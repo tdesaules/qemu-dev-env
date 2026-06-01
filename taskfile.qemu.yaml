@@ -1,8 +1,8 @@
 version: "3"
 
 vars:
-  log: source scripts/utils.sh && _log
-  error: source scripts/utils.sh && _error_handler
+  log: source {{ .TASKFILE_DIR }}/scripts/utils.sh && _log
+  error: source {{ .TASKFILE_DIR }}/scripts/utils.sh && _error_handler
   qemu_os_arch:
     sh: 'uname -m | sed "s/arm64/aarch64/"'
   qemu_butane_user_name:
@@ -18,7 +18,7 @@ vars:
       fi
   kcl_dataset:
     sh: |
-      kcl .qemu/qemu.k .qemu/butane-render.k --format json \
+      kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --format json \
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
         --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
         --argument qemu_butane_hostname='{{ .qemu_butane_hostname | lower }}'
@@ -58,12 +58,12 @@ tasks:
     silent: true
     deps: []
     status:
-      - test -f .qemu/.uuid
+      - test -f {{ .TASKFILE_DIR }}/.uuid
     cmds:
       - |
         {{ .log }} "title" "create a qemu.uuid file with qemu vm uuid identifier"
-        {{ .log }} "info" "echo "{{ .qemu_uuid }}" > .qemu/.uuid"
-        if ! echo "{{ .qemu_uuid }}" > .qemu/.uuid; then {{ .error }} "failed to create .uuid"; fi
+        {{ .log }} "info" "echo "{{ .qemu_uuid }}" > {{ .TASKFILE_DIR }}/.uuid"
+        if ! echo "{{ .qemu_uuid }}" > {{ .TASKFILE_DIR }}/.uuid; then {{ .error }} "failed to create .uuid"; fi
         {{ .log }} "success" "uuid file successfully created"
 
   pull-image:
@@ -124,16 +124,16 @@ tasks:
     silent: true
     deps: []
     sources:
-      - ".qemu/config.k"
-      - ".qemu/schema.k"
-      - ".qemu/butane-render.k"
+      - "{{ .TASKFILE_DIR }}/config.k"
+      - "{{ .TASKFILE_DIR }}/schema.k"
+      - "{{ .TASKFILE_DIR }}/butane-render.k"
     generates:
-      - ".qemu/config.bu"
+      - "{{ .TASKFILE_DIR }}/config.bu"
     cmds:
       - |
         {{ .log }} "title" "build butane configuration"
-        {{ .log }} "info" "kcl .qemu/qemu.k .qemu/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane"
-        if ! kcl .qemu/qemu.k .qemu/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane > .qemu/config.bu; then {{ .error }} "butane config failed"; fi
+        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/qemu.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane"
+        if ! kcl {{ .TASKFILE_DIR }}/qemu.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
         {{ .log }} "success" "butane config generated"
 
   build-ignition:
@@ -142,14 +142,14 @@ tasks:
     silent: true
     deps: []
     sources:
-      - ".qemu/config.bu"
+      - "{{ .TASKFILE_DIR }}/config.bu"
     generates:
-      - ".qemu/config.ign"
+      - "{{ .TASKFILE_DIR }}/config.ign"
     cmds:
       - |
         {{ .log }} "title" "build ignition configuration"
-        {{ .log }} "info" "butane --strict .qemu/config.bu --output .qemu/config.ign"
-        if !  butane --strict .qemu/config.bu --output .qemu/config.ign > /dev/null 2>&1; then {{ .error }} "ignition config failed"; fi
+        {{ .log }} "info" "butane --strict {{ .TASKFILE_DIR }}/config.bu --output {{ .TASKFILE_DIR }}/config.ign"
+        if !  butane --strict {{ .TASKFILE_DIR }}/config.bu --output {{ .TASKFILE_DIR }}/config.ign > /dev/null 2>&1; then {{ .error }} "ignition config failed"; fi
         {{ .log }} "success" "ignition config generated"
 
   delete-workspace:
@@ -172,8 +172,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "delete qemu uuid file"
-        {{ .log }} "info" "rm -rf .qemu/.uuid"
-        if ! rm -rf .qemu/.uuid; then {{ .error }} "failed to delete qemu uuid file"; fi
+        {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/.uuid"
+        if ! rm -rf {{ .TASKFILE_DIR }}/.uuid; then {{ .error }} "failed to delete qemu uuid file"; fi
         {{ .log }} "success" "qemu uuid file correctly deleted"
 
   delete-ignition:
@@ -184,8 +184,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "delete ignition file"
-        {{ .log }} "info" "rm -rf .qemu/config.ign"
-        if ! rm -rf .qemu/config.ign; then {{ .error }} "failed to delete ignition file"; fi
+        {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.ign"
+        if ! rm -rf {{ .TASKFILE_DIR }}/config.ign; then {{ .error }} "failed to delete ignition file"; fi
         {{ .log }} "success" "ignition file correctly deleted"
 
   delete-butane:
@@ -196,8 +196,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "delete butane file"
-        {{ .log }} "info" "rm -rf .qemu/config.bu"
-        if ! rm -rf .qemu/config.bu; then {{ .error }} "failed to delete butane file"; fi
+        {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.bu"
+        if ! rm -rf {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "failed to delete butane file"; fi
         {{ .log }} "success" "butane file correctly deleted"
 
   # status:
