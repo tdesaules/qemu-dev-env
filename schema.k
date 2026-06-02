@@ -1,13 +1,20 @@
 import file
 import crypto
 
+_taskfile_dir = option("taskfile_dir") or "."
+_username = option("qemu_butane_user_name") or "empty"
+_groupname = option("qemu_butane_group_name") or _username
+_uid = int(option("qemu_butane_user_id") or "1000")
+
 schema Qemu:
-    uuid: str = file.read("${option('taskfile_dir')}/.uuid").strip() if file.exists("${option('taskfile_dir')}/.uuid") else crypto.uuid()
+    uuid: str = file.read("${_taskfile_dir}/.uuid").strip() if file.exists("${_taskfile_dir}/.uuid") else crypto.uuid()
     workspace: str = "${file.read_env('HOME')}/.qemu/${uuid}"
     os: Os {}
     checksum: Checksum {}
     hardware: Hardware {}
-    butane: Butane {}
+    butane: Butane = Butane {
+        hostname = uuid
+    }
 
 schema Os:
     name: str = "fedora"
@@ -34,8 +41,8 @@ schema Disk:
 
 schema Butane:
     user: ButaneUser = ButaneUser {}
-    hostname: str = option("qemu_butane_hostname") or "qemu-hostname"
-    default_pkgs: [str] = ["git", "topgrade", "mise"]
+    hostname: str = hostname
+    default_pkgs: [str] = ["git", "terra-release", "topgrade", "mise"]
     custom_pkgs: [str] = []
     directories: [ButaneDirectory] = [
         {
@@ -45,10 +52,35 @@ schema Butane:
     ]
     files: [ButaneFile] = [
         {
+            path = "/etc/yum.repos.d/terra.repo"
+            mode = 420
+            contents.inline = """\
+[terra]
+name=Terra $releasever
+baseurl=https://repos.fyralabs.com/terra$releasever
+type=rpm
+skip_if_unavailable=True
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://repos.fyralabs.com/terra$releasever/key.asc
+enabled=1
+enabled_metadata=1
+metadata_expire=4h
+"""
+        }
+        {
             path = "/etc/hostname"
             mode = 420
             contents.inline = """\
-${hostname}
+${hostname}.local
+"""
+        }
+        {
+            path = "/etc/systemd/resolved.conf.d/mdns.conf"
+            mode = 420
+            contents.inline = """\
+[Resolve]
+MulticastDNS=yes
 """
         }
         {
@@ -57,30 +89,6 @@ ${hostname}
             contents.inline = """\
 export TERM=linux
 export SYSTEMD_PAGER=cat
-"""
-        }
-        {
-            path = "/etc/containers/containers.conf"
-            mode = 420
-            contents.inline = """\
-[containers]
-netns="host"
-dns_servers = ["1.1.1.1", "8.8.8.8"]
-mtu = 1450
-"""
-        }
-        {
-            path = "/etc/subuid"
-            mode = 420
-            contents.inline = """\
-${user.name}:100000:65536
-"""
-        }
-        {
-            path = "/etc/subgid"
-            mode = 420
-            contents.inline = """\
-${user.name}:100000:65536
 """
         }
         {
@@ -99,6 +107,7 @@ ${user.name} ALL=(ALL) NOPASSWD: ALL
             contents = """\
 [Unit]
 Description=Provisioning System Packages
+ConditionVirtualization=qemu
 After=network-online.target
 Wants=network-online.target
 
@@ -108,12 +117,12 @@ RemainAfterExit=yes
 ExecStart=/usr/bin/bash -c ' \\
     MISSING_PKGS=""; \\
     for PKG in ${" ".join(default_pkgs + custom_pkgs)}; do \\
-        if ! rpm -q "\${PKG}" &> /dev/null; then \\
-            MISSING_PKGS="\${MISSING_PKGS} \${PKG}"; \\
+        if ! rpm -q "$$PKG" &> /dev/null; then \\
+            MISSING_PKGS="$$MISSING_PKGS $$PKG"; \\
         fi; \\
     done; \\
-    if [ -n "\${MISSING_PKGS}" ]; then \\
-        /usr/bin/rpm-ostree install --apply-live --allow-inactive \${MISSING_PKGS}; \\
+    if [ -n "$$MISSING_PKGS" ]; then \\
+        /usr/bin/rpm-ostree install --apply-live --allow-inactive $$MISSING_PKGS; \\
     fi'
 
 [Install]
@@ -145,15 +154,19 @@ WantedBy=multi-user.target
             contents = """\
 [Unit]
 Description=Extract Kernel and Initramfs for Host Direct Boot
+ConditionVirtualization=qemu
 Requires=var-home-${user.name}-.qemu.mount
 After=var-home-${user.name}-.qemu.mount
-ConditionPathExists=!/var/home/${user.name}/qemu/kernels/vmlinuz
+ConditionPathExists=!/var/home/${user.name}/.qemu/kernels/vmlinuz
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/usr/bin/mkdir -p /var/home/${user.name}/.qemu/kernels
-ExecStart=/usr/bin/bash -c 'cp /boot/vmlinuz-* /var/home/${user.name}/.qemu/kernels/vmlinuz && cp /boot/initramfs-* /var/home/${user.name}/.qemu/kernels/initramfs'
+ExecStart=/usr/bin/bash -c ' \\
+    KVER=$$(uname -r); \\
+    cp /boot/ostree/*/vmlinuz-$$KVER /var/home/${user.name}/.qemu/kernels/vmlinuz && \\
+    cp /boot/ostree/*/initramfs-$$KVER.img /var/home/${user.name}/.qemu/kernels/initramfs'
 
 [Install]
 WantedBy=multi-user.target
@@ -161,7 +174,7 @@ WantedBy=multi-user.target
         }
         {
             name = "var-home-${user.name}-workspace.mount"
-            enabled = True
+            enabled = False
             contents = """\
 [Unit]
 Description=Mount Host Shared Directory in Home
@@ -172,6 +185,18 @@ What=workspace
 Where=/var/home/${user.name}/workspace
 Type=9p
 Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
+"""
+        }
+        {
+            name = "var-home-${user.name}-workspace.automount"
+            enabled = True
+            contents = """\
+[Unit]
+Description=Automount Workspace Shared Directory in Home
+ConditionVirtualization=qemu
+
+[Automount]
+Where=/var/home/${user.name}/workspace
 
 [Install]
 WantedBy=multi-user.target
@@ -182,7 +207,7 @@ WantedBy=multi-user.target
             enabled = True
             contents = """\
 [Unit]
-Description=Mount Starship Config (ReadOnly)
+Description=Mount Starship Config
 ConditionVirtualization=qemu
 
 [Mount]
@@ -199,8 +224,8 @@ WantedBy=multi-user.target
     custom_units: [ButaneUnit] = []
 
 schema ButaneUser:
-    name: str = option("qemu_butane_user_name") or "empty"
-    uid: int = int(option("qemu_butane_user_id") or "1000")
+    name: str = _username
+    uid: int = _uid
     default_ssh_key_path: str = "${file.read_env('HOME')}/.ssh/id_ed25519.pub"
     ssh_keys: [str] = [file.read(default_ssh_key_path).strip()] if file.exists(default_ssh_key_path) else []
 
@@ -217,10 +242,10 @@ schema ButaneDirectory:
     group: ButaneDirectoryGroup = ButaneDirectoryGroup {}
 
 schema ButaneDirectoryUser:
-    name: str = option("qemu_butane_user_name") or "empty"
+    name: str = _username
 
 schema ButaneDirectoryGroup:
-    name: str = option("qemu_butane_group_name") or option("qemu_butane_user_name")
+    name: str = _groupname
 
 schema ButaneFileContents:
     inline: str

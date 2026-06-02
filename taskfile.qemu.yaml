@@ -9,20 +9,12 @@ vars:
     sh: "whoami"
   qemu_butane_user_id:
     sh: "id -u"
-  qemu_butane_hostname:
-    sh: |
-      if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo "$(basename $(git rev-parse --show-toplevel))"
-      else
-        echo "$(basename "$PWD")"
-      fi
   kcl_dataset:
     sh: |
       kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --format json \
         --argument taskfile_dir='{{ .TASKFILE_DIR }}' \
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
-        --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
-        --argument qemu_butane_hostname='{{ .qemu_butane_hostname | lower }}'
+        --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}'
     cache: true
   qemu_uuid: "{{ ( .kcl_dataset | fromJson ).qemu.uuid }}"
   qemu_workspace: "{{ ( .kcl_dataset | fromJson ).qemu.workspace }}"
@@ -169,12 +161,12 @@ tasks:
     silent: true
     deps: []
     status:
-      - test ! -f "{{ .qemu_workspace }}"
+      - test ! -d "{{ .qemu_workspace }}"
     cmds:
       - |
         {{ .log }} "title" "delete workspace"
-        {{ .log }} "info" "rm -rf {{ .qemu_workspace }}"
-        if ! sudo rm -rf {{ .qemu_workspace }}; then {{ .error }} "failed to delete workspace directory"; fi
+        {{ .log }} "info" "rm -rf \"{{ .qemu_workspace }}\""
+        if ! sudo rm -rf "{{ .qemu_workspace }}"; then {{ .error }} "failed to delete workspace directory"; fi
         {{ .log }} "success" "workspace directory successfully deleted"
 
   delete-uuid:
@@ -243,7 +235,7 @@ tasks:
           -name "{{ .qemu_uuid }}" \
           -M virt,highmem=off \
           -accel hvf \
-          -cpu host,hvf=on \
+          -cpu host \
           -smp "{{ .qemu_hardware_cpu }}" \
           -m "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
           -display none \
@@ -256,11 +248,11 @@ tasks:
           -fw_cfg name=opt/com.coreos/config,file="{{ .TASKFILE_DIR }}/config.ign" \
           -netdev vmnet-shared,id=net0 \
           -device virtio-net-pci,netdev=net0 \
-          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough,cache=loose \
+          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough \
           -device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu \
-          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough,cache=loose \
+          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough \
           -device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace \
-          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on,cache=loose \
+          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on \
           -device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship \
           -serial file:"{{ .qemu_workspace }}/qemu.log"
         {{ .log }} "success" "virtual machine started"
@@ -279,7 +271,7 @@ tasks:
           -name "{{ .qemu_uuid }}" \
           -M virt,highmem=off \
           -accel hvf \
-          -cpu host,hvf=on \
+          -cpu host \
           -smp "{{ .qemu_hardware_cpu }}" \
           -m "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
           -display none \
@@ -295,11 +287,11 @@ tasks:
           -fw_cfg name=opt/com.coreos/config,file="{{ .TASKFILE_DIR }}/config.ign" \
           -netdev vmnet-shared,id=net0 \
           -device virtio-net-pci,netdev=net0 \
-          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough,cache=loose \
+          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough \
           -device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu \
-          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough,cache=loose \
+          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough \
           -device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace \
-          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on,cache=loose \
+          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on \
           -device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship \
           -serial file:"{{ .qemu_workspace }}/qemu.log"
         {{ .log }} "success" "virtual machine started"
