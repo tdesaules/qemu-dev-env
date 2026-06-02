@@ -2,7 +2,7 @@ import file
 import crypto
 
 schema Qemu:
-    uuid: str = file.read(".qemu/.uuid").strip() if file.exists(".qemu/.uuid") else crypto.uuid()
+    uuid: str = file.read("${option('taskfile_dir')}/.uuid").strip() if file.exists("${option('taskfile_dir')}/.uuid") else crypto.uuid()
     workspace: str = "${file.read_env('HOME')}/.qemu/${uuid}"
     os: Os {}
     checksum: Checksum {}
@@ -20,17 +20,29 @@ schema Checksum:
     aarch64: str = "empty"
 
 schema Hardware:
+    cpu: int = 1
+    memory: Memory {}
     disk: Disk {}
+
+schema Memory:
+    size: int = 1024
+    unit: str = "M"
 
 schema Disk:
     size: int = 16
-    unit: str = "g"
+    unit: str = "G"
 
 schema Butane:
     user: ButaneUser = ButaneUser {}
     hostname: str = option("qemu_butane_hostname") or "qemu-hostname"
     default_pkgs: [str] = ["git", "topgrade", "mise"]
     custom_pkgs: [str] = []
+    directories: [ButaneDirectory] = [
+        {
+            path = "/var/home/${user.name}/.config"
+            mode = 493
+        }
+    ]
     files: [ButaneFile] = [
         {
             path = "/etc/hostname"
@@ -109,6 +121,45 @@ WantedBy=multi-user.target
 """
         }
         {
+            name = "var-home-${user.name}-.qemu.mount"
+            enabled = True
+            contents = """\
+[Unit]
+Description=Mount QEMU project workspace
+ConditionVirtualization=qemu
+Before=extract-kernel.service
+
+[Mount]
+What=qemu
+Where=/var/home/${user.name}/.qemu
+Type=9p
+Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
+
+[Install]
+WantedBy=multi-user.target
+"""
+        }
+        {
+            name = "extract-kernel.service"
+            enabled = True
+            contents = """\
+[Unit]
+Description=Extract Kernel and Initramfs for Host Direct Boot
+Requires=var-home-${user.name}-.qemu.mount
+After=var-home-${user.name}-.qemu.mount
+ConditionPathExists=!/var/home/${user.name}/qemu/kernels/vmlinuz
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/mkdir -p /var/home/${user.name}/.qemu/kernels
+ExecStart=/usr/bin/bash -c 'cp /boot/vmlinuz-* /var/home/${user.name}/.qemu/kernels/vmlinuz && cp /boot/initramfs-* /var/home/${user.name}/.qemu/kernels/initramfs'
+
+[Install]
+WantedBy=multi-user.target
+"""
+        }
+        {
             name = "var-home-${user.name}-workspace.mount"
             enabled = True
             contents = """\
@@ -120,14 +171,14 @@ ConditionVirtualization=qemu
 What=workspace
 Where=/var/home/${user.name}/workspace
 Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=104857600
+Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
 
 [Install]
 WantedBy=multi-user.target
 """
         }
         {
-            name = "etc-starship.mount"
+            name = "var-home-${user.name}-.config-starship.mount"
             enabled = True
             contents = """\
 [Unit]
@@ -136,9 +187,9 @@ ConditionVirtualization=qemu
 
 [Mount]
 What=starship
-Where=/etc/starship
+Where=/var/home/${user.name}/.config/starship
 Type=9p
-Options=trans=virtio,version=9p2000.L,ro,msize=104857600
+Options=trans=virtio,version=9p2000.L,ro,msize=104857600,cache=loose
 
 [Install]
 WantedBy=multi-user.target
@@ -158,6 +209,18 @@ schema ButaneFile:
     mode: int
     overwrite: bool = True
     contents: ButaneFileContents
+
+schema ButaneDirectory:
+    path: str
+    mode: int
+    user: ButaneDirectoryUser = ButaneDirectoryUser {}
+    group: ButaneDirectoryGroup = ButaneDirectoryGroup {}
+
+schema ButaneDirectoryUser:
+    name: str = option("qemu_butane_user_name") or "empty"
+
+schema ButaneDirectoryGroup:
+    name: str = option("qemu_butane_group_name") or option("qemu_butane_user_name")
 
 schema ButaneFileContents:
     inline: str

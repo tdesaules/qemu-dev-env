@@ -19,6 +19,7 @@ vars:
   kcl_dataset:
     sh: |
       kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --format json \
+        --argument taskfile_dir='{{ .TASKFILE_DIR }}' \
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
         --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
         --argument qemu_butane_hostname='{{ .qemu_butane_hostname | lower }}'
@@ -30,6 +31,9 @@ vars:
   qemu_os_version: "{{ ( .kcl_dataset | fromJson ).qemu.os.version }}"
   qemu_os_streams: "{{ ( .kcl_dataset | fromJson ).qemu.os.streams }}"
   qemu_checksum: "{{ index ( .kcl_dataset | fromJson ).qemu.checksum .qemu_os_arch }}"
+  qemu_hardware_cpu: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.cpu }}"
+  qemu_hardware_memory_size: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.memory.size }}"
+  qemu_hardware_memory_unit: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.memory.unit }}"
   qemu_hardware_disk_unit: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.disk.unit }}"
   qemu_hardware_disk_size: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.disk.size }}"
 
@@ -52,8 +56,21 @@ tasks:
       - task: delete-ignition
       - task: delete-butane
 
+  start:
+    desc: ""
+    vars:
+      vm_task:
+        sh: |
+          if [ -f "{{ .qemu_workspace }}/kernels/vmlinuz" ] && [ -f "{{ .qemu_workspace }}/kernels/initramfs" ]; then
+            echo "start-vm"
+          else
+            echo "init-vm"
+          fi
+    cmds:
+      - task: clean-pid
+      - task: "{{ .vm_task }}"
+
   generate-uuid:
-    desc: "Generate a persistent custom UUID file if it does not exist"
     internal: true
     silent: true
     deps: []
@@ -67,7 +84,6 @@ tasks:
         {{ .log }} "success" "uuid file successfully created"
 
   pull-image:
-    desc: "Download and check image signature and checksum"
     internal: true
     silent: true
     deps: []
@@ -91,7 +107,6 @@ tasks:
         {{ .log }} "success" "image downloaded and verified successfully"
 
   extract-image:
-    desc: "Extract .qcow2 image from archive if missing"
     internal: true
     silent: true
     deps: []
@@ -105,7 +120,6 @@ tasks:
         {{ .log }} "success" "image extracted"
 
   resize-image:
-    desc: "Resize .qcow2 image"
     internal: true
     silent: true
     deps: []
@@ -119,7 +133,6 @@ tasks:
         {{ .log }} "success" "image extracted"
 
   build-butane:
-    desc: "Compile Kcl config to Butane"
     internal: true
     silent: true
     deps: []
@@ -132,12 +145,11 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "build butane configuration"
-        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/qemu.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane"
-        if ! kcl {{ .TASKFILE_DIR }}/qemu.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
+        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane"
+        if ! kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
         {{ .log }} "success" "butane config generated"
 
   build-ignition:
-    desc: "Compile Butane config to Ignition"
     internal: true
     silent: true
     deps: []
@@ -153,22 +165,24 @@ tasks:
         {{ .log }} "success" "ignition config generated"
 
   delete-workspace:
-    desc: "Remove qemu workspace"
     internal: true
     silent: true
     deps: []
+    status:
+      - test ! -f "{{ .qemu_workspace }}"
     cmds:
       - |
         {{ .log }} "title" "delete workspace"
         {{ .log }} "info" "rm -rf {{ .qemu_workspace }}"
-        if ! rm -rf {{ .qemu_workspace }}; then {{ .error }} "failed to delete workspace directory"; fi
+        if ! sudo rm -rf {{ .qemu_workspace }}; then {{ .error }} "failed to delete workspace directory"; fi
         {{ .log }} "success" "workspace directory successfully deleted"
 
   delete-uuid:
-    desc: "Remove uuid file"
     internal: true
     silent: true
     deps: []
+    status:
+      - test ! -f "{{ .TASKFILE_DIR }}/.uuid"
     cmds:
       - |
         {{ .log }} "title" "delete qemu uuid file"
@@ -177,10 +191,11 @@ tasks:
         {{ .log }} "success" "qemu uuid file correctly deleted"
 
   delete-ignition:
-    desc: "Remove ignition file"
     internal: true
     silent: true
     deps: []
+    status:
+      - test ! -f "{{ .TASKFILE_DIR }}/config.ign"
     cmds:
       - |
         {{ .log }} "title" "delete ignition file"
@@ -189,16 +204,105 @@ tasks:
         {{ .log }} "success" "ignition file correctly deleted"
 
   delete-butane:
-    desc: "Remove butane file"
     internal: true
     silent: true
     deps: []
+    status:
+      - test ! -f "{{ .TASKFILE_DIR }}/config.bu"
     cmds:
       - |
         {{ .log }} "title" "delete butane file"
         {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.bu"
         if ! rm -rf {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "failed to delete butane file"; fi
         {{ .log }} "success" "butane file correctly deleted"
+
+  clean-pid:
+    internal: true
+    silent: true
+    deps: []
+    status:
+      - test ! -f "{{ .qemu_workspace }}/qemu.pid"
+    cmds:
+      - |
+        {{ .log }} "title" "clean pid file"
+        {{ .log }} "info" "rm -rf {{ .qemu_workspace }}/qemu.pid"
+        if ! sudo rm -rf {{ .qemu_workspace }}/qemu.pid; then {{ .error }} "failed to delete pid file"; fi
+        {{ .log }} "success" "pid file correctly deleted"
+
+  init-vm:
+    internal: true
+    silent: true
+    deps: []
+    status:
+      - test -f "{{ .qemu_workspace }}/qemu.pid" && sudo kill -0 $(sudo cat "{{ .qemu_workspace }}/qemu.pid") 2> /dev/null
+    cmds:
+      - |
+        {{ .log }} "title" "init virtual machine"
+        {{ .log }} "info" ""
+        sudo qemu-system-aarch64 \
+          -name "{{ .qemu_uuid }}" \
+          -M virt,highmem=off \
+          -accel hvf \
+          -cpu host,hvf=on \
+          -smp "{{ .qemu_hardware_cpu }}" \
+          -m "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
+          -display none \
+          -daemonize \
+          -nodefaults \
+          -pidfile "{{ .qemu_workspace }}/qemu.pid" \
+          -device virtio-rng-pci \
+          -drive if=pflash,format=raw,readonly=on,file="/opt/homebrew/share/qemu/edk2-aarch64-code.fd" \
+          -drive if=virtio,format=qcow2,file="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2",cache=unsafe \
+          -fw_cfg name=opt/com.coreos/config,file="{{ .TASKFILE_DIR }}/config.ign" \
+          -netdev vmnet-shared,id=net0 \
+          -device virtio-net-pci,netdev=net0 \
+          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough,cache=loose \
+          -device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu \
+          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough,cache=loose \
+          -device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace \
+          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on,cache=loose \
+          -device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship \
+          -serial file:"{{ .qemu_workspace }}/qemu.log"
+        {{ .log }} "success" "virtual machine started"
+
+  start-vm:
+    internal: true
+    silent: true
+    deps: []
+    status:
+      - test -f "{{ .qemu_workspace }}/qemu.pid" && sudo kill -0 $(sudo cat "{{ .qemu_workspace }}/qemu.pid") 2> /dev/null
+    cmds:
+      - |
+        {{ .log }} "title" "start virtual machine"
+        {{ .log }} "info" ""
+        sudo qemu-system-aarch64 \
+          -name "{{ .qemu_uuid }}" \
+          -M virt,highmem=off \
+          -accel hvf \
+          -cpu host,hvf=on \
+          -smp "{{ .qemu_hardware_cpu }}" \
+          -m "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
+          -display none \
+          -daemonize \
+          -nodefaults \
+          -no-acpi \
+          -pidfile "{{ .qemu_workspace }}/qemu.pid" \
+          -device virtio-rng-pci \
+          -kernel "{{ .qemu_workspace }}/kernels/vmlinuz" \
+          -initrd "{{ .qemu_workspace }}/kernels/initramfs" \
+          -append "console=ttyAMA0 rw coreos.ignition.show coreos.ignition.config.url=fw_cfg:opt/com.coreos/config" \
+          -drive if=virtio,format=qcow2,file="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2",cache=unsafe \
+          -fw_cfg name=opt/com.coreos/config,file="{{ .TASKFILE_DIR }}/config.ign" \
+          -netdev vmnet-shared,id=net0 \
+          -device virtio-net-pci,netdev=net0 \
+          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough,cache=loose \
+          -device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu \
+          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough,cache=loose \
+          -device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace \
+          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on,cache=loose \
+          -device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship \
+          -serial file:"{{ .qemu_workspace }}/qemu.log"
+        {{ .log }} "success" "virtual machine started"
 
   # status:
   #   desc: "Return QEMU virtual machine status"

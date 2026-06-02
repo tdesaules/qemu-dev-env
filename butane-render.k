@@ -15,6 +15,7 @@ butane = {
             ssh_authorized_keys = [*qemu.butane.user.ssh_keys]
         }
     ]
+    storage.directories = qemu.butane.directories
     storage.files = qemu.butane.files
     systemd.units = qemu.butane.units
 }
