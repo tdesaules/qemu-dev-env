@@ -3,131 +3,236 @@ version: "3"
 vars:
   log: source {{ .TASKFILE_DIR }}/scripts/utils.sh && _log
   error: source {{ .TASKFILE_DIR }}/scripts/utils.sh && _error_handler
-  qemu_os_arch:
+  qemu_host_arch:
     sh: 'uname -m | sed "s/arm64/aarch64/"'
+  qemu_host_os:
+    sh: 'uname -s | tr "[:upper:]" "[:lower:]"'
   qemu_butane_user_name:
     sh: "whoami"
   qemu_butane_user_id:
     sh: "id -u"
   kcl_dataset:
     sh: |
-      kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --format json \
+      kcl {{ .TASKFILE_DIR }}/config.k --format json \
         --argument taskfile_dir='{{ .TASKFILE_DIR }}' \
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
-        --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}'
+        --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
+        --argument qemu_host_arch='{{ .qemu_host_arch }}' \
+        --argument qemu_host_os='{{ .qemu_host_os }}'
     cache: true
-  qemu_uuid: "{{ ( .kcl_dataset | fromJson ).qemu.uuid }}"
-  qemu_workspace: "{{ ( .kcl_dataset | fromJson ).qemu.workspace }}"
-  qemu_os_name: "{{ ( .kcl_dataset | fromJson ).qemu.os.name }}"
-  qemu_os_edition: "{{ ( .kcl_dataset | fromJson ).qemu.os.edition }}"
-  qemu_os_version: "{{ ( .kcl_dataset | fromJson ).qemu.os.version }}"
-  qemu_os_streams: "{{ ( .kcl_dataset | fromJson ).qemu.os.streams }}"
-  qemu_checksum: "{{ index ( .kcl_dataset | fromJson ).qemu.checksum .qemu_os_arch }}"
-  qemu_hardware_cpu: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.cpu }}"
-  qemu_hardware_memory_size: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.memory.size }}"
-  qemu_hardware_memory_unit: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.memory.unit }}"
-  qemu_hardware_disk_unit: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.disk.unit }}"
-  qemu_hardware_disk_size: "{{ ( .kcl_dataset | fromJson ).qemu.hardware.disk.size }}"
+  qemu_uuid: "{{ ( .kcl_dataset | fromJson ).config.uuid }}"
+  qemu_workspace: "{{ ( .kcl_dataset | fromJson ).config.workspace }}"
+  qemu_os_name: "{{ ( .kcl_dataset | fromJson ).config.os.name }}"
+  qemu_os_edition: "{{ ( .kcl_dataset | fromJson ).config.os.edition }}"
+  qemu_os_version: "{{ ( .kcl_dataset | fromJson ).config.os.version }}"
+  qemu_os_streams: "{{ ( .kcl_dataset | fromJson ).config.os.streams }}"
+  qemu_checksum: "{{ index ( .kcl_dataset | fromJson ).config.checksum .qemu_host_arch }}"
+  qemu_hardware_cpu: "{{ ( .kcl_dataset | fromJson ).config.hardware.cpu }}"
+  qemu_hardware_memory_size: "{{ ( .kcl_dataset | fromJson ).config.hardware.memory.size }}"
+  qemu_hardware_memory_unit: "{{ ( .kcl_dataset | fromJson ).config.hardware.memory.unit }}"
+  qemu_hardware_disk_unit: "{{ ( .kcl_dataset | fromJson ).config.hardware.disk.unit }}"
+  qemu_hardware_disk_size: "{{ ( .kcl_dataset | fromJson ).config.hardware.disk.size }}"
+  qemu_command_binary: "{{ ( .kcl_dataset | fromJson ).config.command.binary }}"
+  qemu_command_options: '{{ ( .kcl_dataset | fromJson ).config.command.options | join " " }}'
 
 tasks:
-  init:
-    desc: ""
+  check:
+    desc: "QEMU : Confirm dependencies are meet"
+    cmds:
+      - task: check-qemu
+      - task: check-butane
+      - task: check-shasum
+      - task: check-jq
+      - task: check-kcl
+      - task: check-curl
+      - task: check-gpgv
+
+  up:
+    desc: "QEMU : Wake up the virtual machine"
     cmds:
       - task: generate-uuid
+      - task: create-workspace
       - task: pull-image
+      - task: image-validation
       - task: extract-image
       - task: resize-image
       - task: build-butane
       - task: build-ignition
+      - task: delete-pid
+      - task: launch-vm
+      - task: wait-ssh
 
-  clean:
-    desc: ""
+  down:
+    desc: "QEMU : Destroy the virtual machine"
     cmds:
       - task: delete-workspace
       - task: delete-uuid
       - task: delete-ignition
       - task: delete-butane
 
-  start:
-    desc: ""
-    vars:
-      vm_task:
-        sh: |
-          if [ -f "{{ .qemu_workspace }}/kernels/vmlinuz" ] && [ -f "{{ .qemu_workspace }}/kernels/initramfs" ]; then
-            echo "start-vm"
-          else
-            echo "init-vm"
-          fi
+  check-qemu:
+    internal: true
+    silent: true
     cmds:
-      - task: clean-pid
-      - task: "{{ .vm_task }}"
+      - |
+        {{ .log }} "title" "check qemu binary"
+        {{ .log }} "info" "command -v qemu-system-aarch64"
+        if ! command -v qemu-system-aarch64 > /dev/null 2>&1 ; then {{ .error }} "can't find \"qemu-system-aarch64\" binary" ; fi
+        {{ .log }} "success" "\"qemu-system-aarch64\" binary available"
+
+  check-butane:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check butane binary"
+        {{ .log }} "info" "command -v butane"
+        if ! command -v butane > /dev/null 2>&1 ; then {{ .error }} "can't find \"butane\" binary" ; fi
+        {{ .log }} "success" "\"butane\" binary available"
+
+  check-shasum:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check shasum binary"
+        {{ .log }} "info" "command -v shasum"
+        if ! command -v shasum > /dev/null 2>&1 ; then {{ .error }} "can't find \"shasum\" binary" ; fi
+        {{ .log }} "success" "\"shasum\" binary available"
+
+  check-jq:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check jq binary"
+        {{ .log }} "info" "command -v jq"
+        if ! command -v jq > /dev/null 2>&1 ; then {{ .error }} "can't find \"jq\" binary" ; fi
+        {{ .log }} "success" "\"jq\" binary available"
+
+  check-kcl:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check kcl binary"
+        {{ .log }} "info" "command -v kcl"
+        if ! command -v kcl > /dev/null 2>&1 ; then {{ .error }} "can't find \"kcl\" binary" ; fi
+        {{ .log }} "success" "\"kcl\" binary available"
+
+  check-curl:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check curl binary"
+        {{ .log }} "info" "command -v curl"
+        if ! command -v curl > /dev/null 2>&1 ; then {{ .error }} "can't find \"curl\" binary" ; fi
+        {{ .log }} "success" "\"curl\" binary available"
+
+  check-gpgv:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check gpgv binary"
+        {{ .log }} "info" "command -v gpgv"
+        if ! command -v gpgv > /dev/null 2>&1 ; then {{ .error }} "can't find \"gpgv\" binary" ; fi
+        {{ .log }} "success" "\"gpgv\" binary available"
 
   generate-uuid:
     internal: true
     silent: true
-    deps: []
     status:
       - test -f {{ .TASKFILE_DIR }}/.uuid
     cmds:
       - |
-        {{ .log }} "title" "create a qemu.uuid file with qemu vm uuid identifier"
+        {{ .log }} "title" "create an uuid file for qemu identifier"
         {{ .log }} "info" "echo "{{ .qemu_uuid }}" > {{ .TASKFILE_DIR }}/.uuid"
-        if ! echo "{{ .qemu_uuid }}" > {{ .TASKFILE_DIR }}/.uuid; then {{ .error }} "failed to create .uuid"; fi
-        {{ .log }} "success" "uuid file successfully created"
+        if ! echo "{{ .qemu_uuid }}" > {{ .TASKFILE_DIR }}/.uuid ; then {{ .error }} "failed to create .uuid file" ; fi
+        {{ .log }} "success" ".uuid file successfully created"
+
+  create-workspace:
+    internal: true
+    silent: true
+    status:
+      - test -d "{{ .qemu_workspace }}"
+    cmds:
+      - |
+        {{ .log }} "title" "create workspace"
+        {{ .log }} "info" "mkdir \"{{ .qemu_workspace }}\""
+        if ! mkdir "{{ .qemu_workspace }}" ; then {{ .error }} "directory \"{{ .qemu_workspace }}\" has not been created"; fi
+        {{ .log }} "success" "workspace directory created"
 
   pull-image:
     internal: true
     silent: true
-    deps: []
     status:
-      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz" | shasum --check --algorithm 256
+      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | shasum --check --algorithm 256
     cmds:
       - |
-        {{ .log }} "title" "download {{ .qemu_os_name }} {{ .qemu_os_edition }} {{ .qemu_os_version }}"
-        {{ .log }} "info" "if needed create directory \"{{ .qemu_uuid }}\""
-        if [ ! -d "{{ .qemu_workspace }}" ]; then mkdir "{{ .qemu_workspace }}"; fi
-        {{ .log }} "info" "curl --silent --location --fail --continue-at - --retry 5 --retry-delay 3 --output \"{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz\" \"https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_os_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_os_arch}}.qcow2.xz\""
-        curl --silent --location --fail --continue-at - --retry 5 --retry-delay 3 --output "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz" "https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_os_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_os_arch}}.qcow2.xz"
-        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"{{ .qemu_workspace }}/fedora.gpg" "https://fedoraproject.org/fedora.gpg\""
-        curl --silent --location --fail --retry 5 --output "{{ .qemu_workspace }}/fedora.gpg" "https://fedoraproject.org/fedora.gpg"
-        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"{{ .qemu_workspace }}/fedora-coreos-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz.sig\" \"https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_os_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_os_arch}}.qcow2.xz.sig\""
-        curl --silent --location --fail --retry 5 --output "{{ .qemu_workspace }}/fedora-coreos-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz.sig" "https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_os_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_os_arch}}.qcow2.xz.sig"
-        {{ .log }} "info" "gpgv --keyring {{ .qemu_workspace }}/fedora.gpg {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz.sig {{ .qemu_workspace }}/fedora-coreos-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz"
-        if ! gpgv --keyring {{ .qemu_workspace }}/fedora.gpg {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz.sig {{ .qemu_workspace }}/fedora-coreos-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz > /dev/null 2>&1; then {{ .error }} "gpg signature verification failed"; fi
-        {{ .log }} "info" "echo \"{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz\" | shasum --check --algorithm 256"
-        if ! echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz" | shasum --check --algorithm 256 > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
-        {{ .log }} "success" "image downloaded and verified successfully"
+        {{ .log }} "title" "pull qemu image"
+        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
+        OUTPUT="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+        URL="https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_host_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_host_arch}}.qcow2.xz"
+        if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
+        {{ .log }} "success" "image downloaded successfully"
+
+  image-validation:
+    internal: true
+    silent: true
+    status:
+      - test -f "{{ .qemu_workspace }}/fedora.gpg"
+      - test -f "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig"
+      - gpgv --keyring "{{ .qemu_workspace }}/fedora.gpg" "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig" "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | shasum --check --algorithm 256
+    cmds:
+      - |
+        {{ .log }} "title" ""
+        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
+        OUTPUT="{{ .qemu_workspace }}/fedora.gpg"
+        URL="https://fedoraproject.org/fedora.gpg"
+        if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
+        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
+        OUTPUT="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig"
+        URL="https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_host_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_host_arch}}.qcow2.xz.sig"
+        if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
+        {{ .log }} "info" "gpgv --keyring \"$KEYRING\" \"$SIG\" \"$QCOW2\""
+        KEYRING="{{ .qemu_workspace }}/fedora.gpg"
+        SIG="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig"
+        QCOW2="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+        if ! gpgv --keyring "$KEYRING" "$SIG" "$QCOW2" > /dev/null 2>&1; then {{ .error }} "gpg signature verification failed"; fi
+        {{ .log }} "info" "echo "{{ .qemu_checksum }}  $QCOW2" | shasum --check --algorithm 256"
+        if ! echo "{{ .qemu_checksum }}  $QCOW2" | shasum --check --algorithm 256 > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
+        {{ .log }} "success" "image is valid"
 
   extract-image:
     internal: true
     silent: true
-    deps: []
     status:
-      - test -f "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2"
+      - test -f "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2"
     cmds:
       - |
-        {{ .log }} "title" "extract {{ .qemu_os_name }} {{ .qemu_os_edition }} {{ .qemu_os_version }}"
-        {{ .log }} "info" "unxz --keep --verbose {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz"
-        if ! unxz --keep --verbose {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2.xz > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
+        {{ .log }} "title" "extract image"
+        {{ .log }} "info" "unxz --keep --verbose {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+        if ! unxz --keep --verbose {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
         {{ .log }} "success" "image extracted"
 
   resize-image:
     internal: true
     silent: true
-    deps: []
     status:
-      - test {{ .qemu_hardware_disk_size }} -eq $(qemu-img info {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2 --output=json | jq -r '."virtual-size" / 1024 / 1024 / 1024')
+      - test {{ .qemu_hardware_disk_size }} -eq $(qemu-img info {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2 --output=json | jq -r '."virtual-size" / 1024 / 1024 / 1024')
     cmds:
       - |
         {{ .log }} "title" "resize qemu disk"
-        {{ .log }} "info" "qemu-img resize {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2 {{ .qemu_hardware_disk_size }}{{ .qemu_hardware_disk_unit }}"
-        if ! qemu-img resize {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2 {{ .qemu_hardware_disk_size }}{{ .qemu_hardware_disk_unit }} > /dev/null 2>&1; then {{ .error }} "qemu disk rezise failed"; fi
+        {{ .log }} "info" "qemu-img resize {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2 {{ .qemu_hardware_disk_size }}{{ .qemu_hardware_disk_unit }}"
+        if ! qemu-img resize {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2 {{ .qemu_hardware_disk_size }}{{ .qemu_hardware_disk_unit }} > /dev/null 2>&1; then {{ .error }} "qemu disk rezise failed"; fi
         {{ .log }} "success" "image extracted"
 
   build-butane:
     internal: true
     silent: true
-    deps: []
     sources:
       - "{{ .TASKFILE_DIR }}/config.k"
       - "{{ .TASKFILE_DIR }}/schema.k"
@@ -136,30 +241,28 @@ tasks:
       - "{{ .TASKFILE_DIR }}/config.bu"
     cmds:
       - |
-        {{ .log }} "title" "build butane configuration"
-        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane"
-        if ! kcl {{ .TASKFILE_DIR }}/config.k {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name="{{ .qemu_butane_user_name }}" --argument qemu_butane_user_id="{{ .qemu_butane_user_id }}" --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
-        {{ .log }} "success" "butane config generated"
+        {{ .log }} "title" "build butane"
+        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --path_selector butane"
+        if ! kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
+        {{ .log }} "success" "butane configuration generated"
 
   build-ignition:
     internal: true
     silent: true
-    deps: []
     sources:
       - "{{ .TASKFILE_DIR }}/config.bu"
     generates:
       - "{{ .TASKFILE_DIR }}/config.ign"
     cmds:
       - |
-        {{ .log }} "title" "build ignition configuration"
+        {{ .log }} "title" "build ignition"
         {{ .log }} "info" "butane --strict {{ .TASKFILE_DIR }}/config.bu --output {{ .TASKFILE_DIR }}/config.ign"
         if !  butane --strict {{ .TASKFILE_DIR }}/config.bu --output {{ .TASKFILE_DIR }}/config.ign > /dev/null 2>&1; then {{ .error }} "ignition config failed"; fi
-        {{ .log }} "success" "ignition config generated"
+        {{ .log }} "success" "ignition configuration generated"
 
   delete-workspace:
     internal: true
     silent: true
-    deps: []
     status:
       - test ! -d "{{ .qemu_workspace }}"
     cmds:
@@ -167,212 +270,130 @@ tasks:
         {{ .log }} "title" "delete workspace"
         {{ .log }} "info" "rm -rf \"{{ .qemu_workspace }}\""
         if ! sudo rm -rf "{{ .qemu_workspace }}"; then {{ .error }} "failed to delete workspace directory"; fi
-        {{ .log }} "success" "workspace directory successfully deleted"
+        {{ .log }} "success" "workspace directory deleted"
 
   delete-uuid:
     internal: true
     silent: true
-    deps: []
     status:
       - test ! -f "{{ .TASKFILE_DIR }}/.uuid"
     cmds:
       - |
-        {{ .log }} "title" "delete qemu uuid file"
+        {{ .log }} "title" "delete .uuid file"
         {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/.uuid"
-        if ! rm -rf {{ .TASKFILE_DIR }}/.uuid; then {{ .error }} "failed to delete qemu uuid file"; fi
-        {{ .log }} "success" "qemu uuid file correctly deleted"
+        if ! rm -rf "{{ .TASKFILE_DIR }}/.uuid"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/.uuid\" file"; fi
+        {{ .log }} "success" ".uuid file deleted"
 
   delete-ignition:
     internal: true
     silent: true
-    deps: []
     status:
       - test ! -f "{{ .TASKFILE_DIR }}/config.ign"
     cmds:
       - |
         {{ .log }} "title" "delete ignition file"
         {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.ign"
-        if ! rm -rf {{ .TASKFILE_DIR }}/config.ign; then {{ .error }} "failed to delete ignition file"; fi
-        {{ .log }} "success" "ignition file correctly deleted"
+        if ! rm -rf "{{ .TASKFILE_DIR }}/config.ign"; then {{ .error }} "failed to delete \" file"; fi
+        if ! rm -rf "{{ .TASKFILE_DIR }}/config.ign"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/config.ign\" file"; fi
+        {{ .log }} "success" "ignition file deleted"
 
   delete-butane:
     internal: true
     silent: true
-    deps: []
     status:
       - test ! -f "{{ .TASKFILE_DIR }}/config.bu"
     cmds:
       - |
         {{ .log }} "title" "delete butane file"
         {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.bu"
-        if ! rm -rf {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "failed to delete butane file"; fi
-        {{ .log }} "success" "butane file correctly deleted"
+        if ! rm -rf "{{ .TASKFILE_DIR }}/config.bu"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/config.bu\" file"; fi
+        {{ .log }} "success" "butane file deleted"
 
-  clean-pid:
+  delete-pid:
     internal: true
     silent: true
-    deps: []
     status:
       - test ! -f "{{ .qemu_workspace }}/qemu.pid"
     cmds:
       - |
         {{ .log }} "title" "clean pid file"
         {{ .log }} "info" "rm -rf {{ .qemu_workspace }}/qemu.pid"
-        if ! sudo rm -rf {{ .qemu_workspace }}/qemu.pid; then {{ .error }} "failed to delete pid file"; fi
-        {{ .log }} "success" "pid file correctly deleted"
+        if ! sudo rm -rf "{{ .qemu_workspace }}/qemu.pid"; then {{ .error }} "failed to delete \"{{ .qemu_workspace }}/qemu.pid\" file"; fi
+        {{ .log }} "success" "pid file deleted"
 
-  init-vm:
+  launch-vm:
     internal: true
     silent: true
-    deps: []
     status:
       - test -f "{{ .qemu_workspace }}/qemu.pid" && sudo kill -0 $(sudo cat "{{ .qemu_workspace }}/qemu.pid") 2> /dev/null
     cmds:
       - |
         {{ .log }} "title" "init virtual machine"
         {{ .log }} "info" ""
-        sudo qemu-system-aarch64 \
-          -name "{{ .qemu_uuid }}" \
-          -M virt,highmem=off \
-          -accel hvf \
-          -cpu host \
-          -smp "{{ .qemu_hardware_cpu }}" \
-          -m "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
-          -display none \
-          -daemonize \
-          -nodefaults \
-          -pidfile "{{ .qemu_workspace }}/qemu.pid" \
-          -device virtio-rng-pci \
-          -drive if=pflash,format=raw,readonly=on,file="/opt/homebrew/share/qemu/edk2-aarch64-code.fd" \
-          -drive if=virtio,format=qcow2,file="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2",cache=unsafe \
-          -fw_cfg name=opt/com.coreos/config,file="{{ .TASKFILE_DIR }}/config.ign" \
-          -netdev vmnet-shared,id=net0 \
-          -device virtio-net-pci,netdev=net0 \
-          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough \
-          -device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu \
-          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough \
-          -device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace \
-          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on \
-          -device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship \
-          -serial file:"{{ .qemu_workspace }}/qemu.log"
+        sudo {{ .qemu_command_binary }} {{ .qemu_command_options }}
         {{ .log }} "success" "virtual machine started"
 
-  start-vm:
+  wait-ssh:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "wait ssh accessible"
+        {{ .log }} "info" ""
+        TIMEOUT=30
+        COUNTER=0
+        until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+        sleep 1
+          COUNTER=$((COUNTER + 1))
+          if [ $COUNTER -gt $TIMEOUT ]; then
+            {{ .error }} "timeout: SSH server not reachable after ${TIMEOUT}s"
+            exit 1
+          fi
+        done
+        {{ .log }} "success" "ssh server is ready and accepting connections"
+
+  wait-provisionning:
     internal: true
     silent: true
     deps: []
-    status:
-      - test -f "{{ .qemu_workspace }}/qemu.pid" && sudo kill -0 $(sudo cat "{{ .qemu_workspace }}/qemu.pid") 2> /dev/null
+    status: []
     cmds:
       - |
-        {{ .log }} "title" "start virtual machine"
+        {{ .log }} "title" "wait provisionning virtual machine"
         {{ .log }} "info" ""
-        sudo qemu-system-aarch64 \
-          -name "{{ .qemu_uuid }}" \
-          -M virt,highmem=off \
-          -accel hvf \
-          -cpu host \
-          -smp "{{ .qemu_hardware_cpu }}" \
-          -m "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
-          -display none \
-          -daemonize \
-          -nodefaults \
-          -no-acpi \
-          -pidfile "{{ .qemu_workspace }}/qemu.pid" \
-          -device virtio-rng-pci \
-          -kernel "{{ .qemu_workspace }}/kernels/vmlinuz" \
-          -initrd "{{ .qemu_workspace }}/kernels/initramfs" \
-          -append "console=ttyAMA0 rw coreos.ignition.show coreos.ignition.config.url=fw_cfg:opt/com.coreos/config" \
-          -drive if=virtio,format=qcow2,file="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_os_arch }}.qcow2",cache=unsafe \
-          -fw_cfg name=opt/com.coreos/config,file="{{ .TASKFILE_DIR }}/config.ign" \
-          -netdev vmnet-shared,id=net0 \
-          -device virtio-net-pci,netdev=net0 \
-          -fsdev local,id=fsdev0,path="{{ .qemu_workspace }}",security_model=passthrough \
-          -device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu \
-          -fsdev local,id=fsdev1,path="$PWD",security_model=passthrough \
-          -device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace \
-          -fsdev local,id=fsdev2,path="$HOME/.config/starship",security_model=passthrough,readonly=on \
-          -device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship \
-          -serial file:"{{ .qemu_workspace }}/qemu.log"
-        {{ .log }} "success" "virtual machine started"
+        PROVISION_TIMEOUT=300
+        PROVISION_COUNTER=0
+        VERIFY_CMD="test -f /usr/bin/git && \
+                    test -f /usr/local/bin/topgrade && \
+                    test -f /usr/local/bin/mise"
+        until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+          sleep 1
+          PROVISION_COUNTER=$((PROVISION_COUNTER + 1))
+          if [ $PROVISION_COUNTER -gt $PROVISION_TIMEOUT ]; then
+            {{ .error }} "provisioning take too long after ${TIMEOUT}s"
+            exit 1
+          fi
+        done
+        {{ .log }} "success" "provisionning done"
 
-  # status:
-  #   desc: "Return QEMU virtual machine status"
-  #   silent: true
-  #   cmds:
-  #     - |
-  #       STATE="stopped"
-  #       PID_VAL="null"
-  #       if [ -f "$QEMU_PID_FILE" ]; then
-  #         READ_PID=$(sudo cat "$QEMU_PID_FILE")
-  #         if sudo kill -0 "$READ_PID" 2>/dev/null; then
-  #           STATE="running"
-  #           PID_VAL="$READ_PID"
-  #         else
-  #           STATE="crashed"
-  #           PID_VAL="$READ_PID"
-  #         fi
-  #       fi
-  #       printf '{"id":"%s","status":"%s","pid":%s,"config":{"memory":"%s","cpu":"%s","image":"%s"}}\n' "$QEMU_VM_ID" "$STATE" "$PID_VAL" "$QEMU_VM_MEMORY" "$QEMU_VM_CPU" "$QEMU_IMAGE_FILE"
-
-  # start:
-  #   desc: "Start QEMU virtual machine"
-  #   silent: true
-  #   deps: [build-ignition, extract-image]
-  #   status:
-  #     - test -f "$QEMU_PID_FILE" && sudo kill -0 $(sudo cat "$QEMU_PID_FILE") 2>/dev/null
-  #   cmds:
-  #     - echo "Starting QEMU virtual machine..."
-  #     - |
-  #       if [ -f "$QEMU_PID_FILE" ]; then
-  #         echo "Clean obsolete pid..."
-  #         sudo rm -f "$QEMU_PID_FILE"
-  #       fi
-  #     - qemu-img resize "${QEMU_IMAGE_FILE}" "${QEMU_VM_DISK}"
-  #     - |
-  #       sudo qemu-system-aarch64 \
-  #         -name "${QEMU_VM_ID}" \
-  #         -m $QEMU_VM_MEMORY -smp $QEMU_VM_CPU -cpu host -accel hvf -M virt \
-  #         -display none \
-  #         -daemonize \
-  #         -pidfile "$QEMU_PID_FILE" \
-  #         -drive if=pflash,format=raw,readonly=on,file="$QEMU_FIRMWARE_FILE" \
-  #         -drive if=virtio,file="${QEMU_IMAGE_FILE}" \
-  #         -fw_cfg name=opt/com.coreos/config,file="$IGNITION_CONFIG_FILE" \
-  #         -netdev vmnet-shared,id=net0 -device virtio-net-pci,netdev=net0 \
-  #         -fsdev local,id=fsdev0,path="$PWD",security_model=passthrough \
-  #         -device virtio-9p-pci,fsdev=fsdev0,mount_tag=workspace \
-  #         -fsdev local,id=fsdev1,path="$HOME/.config/starship",security_model=passthrough,readonly=on \
-  #         -device virtio-9p-pci,fsdev=fsdev1,mount_tag=starship \
-  #         -serial file:"$QEMU_LOG_FILE"
-  #     - echo "QEMU virtual machine started"
-  #     - |
-  #       echo "Waiting for SSH to be available on ${QEMU_VM_HOSTNAME}..."
-  #       TIMEOUT=15
-  #       COUNTER=0
-  #       until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${QEMU_VM_USER}@${QEMU_VM_HOSTNAME} exit 2>/dev/null; do
-  #         sleep 1
-  #         COUNTER=$((COUNTER + 1))
-  #         if [ $COUNTER -gt $TIMEOUT ]; then
-  #           echo -e "\n Timeout: SSH not reachable after ${TIMEOUT}s. Check your logs with 'task qemu:logs'."
-  #           exit 1
-  #         fi
-  #       done
-  #     - |
-  #       echo "Waiting for background provisioning to complete (this may take several minutes)..."
-  #       PROVISION_TIMEOUT=300
-  #       PROVISION_COUNTER=0
-  #       VERIFY_CMD="test -f /usr/bin/fastfetch && \
-  #                   test -f /usr/local/bin/starship"
-  #       until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${QEMU_VM_USER}@${QEMU_VM_HOSTNAME} "$VERIFY_CMD" 2>/dev/null; do
-  #         sleep 1
-  #         PROVISION_COUNTER=$((PROVISION_COUNTER + 1))
-  #         if [ $PROVISION_COUNTER -gt $PROVISION_TIMEOUT ]; then
-  #           echo -e "\n Timeout: Provisioning took too long."
-  #           exit 1
-  #         fi
-  #       done
-  #     - task qemu:status | jq .
+      # status:
+      #   desc: "Return QEMU virtual machine status"
+      #   silent: true
+      #   cmds:
+      #     - |
+      #       STATE="stopped"
+      #       PID_VAL="null"
+      #       if [ -f "$QEMU_PID_FILE" ]; then
+      #         READ_PID=$(sudo cat "$QEMU_PID_FILE")
+      #         if sudo kill -0 "$READ_PID" 2>/dev/null; then
+      #           STATE="running"
+      #           PID_VAL="$READ_PID"
+      #         else
+      #           STATE="crashed"
+      #           PID_VAL="$READ_PID"
+      #         fi
+      #       fi
+      #       printf '{"id":"%s","status":"%s","pid":%s,"config":{"memory":"%s","cpu":"%s","image":"%s"}}\n' "$QEMU_VM_ID" "$STATE" "$PID_VAL" "$QEMU_VM_MEMORY" "$QEMU_VM_CPU" "$QEMU_IMAGE_FILE"
 
   # stop:
   #   desc: "Stop QEMU virtual machine"
@@ -435,46 +456,3 @@ tasks:
   #       ssh-keygen -R $QEMU_VM_HOSTNAME 2>/dev/null
   #       echo "Connexion to {QEMU_VM_USER}@${QEMU_VM_HOSTNAME}..."
   #       ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${QEMU_VM_USER}@${QEMU_VM_HOSTNAME}
-
-  # check:
-  #   desc: "Qemu : Confirm dependencies are meet"
-  #   silent: true
-  #   cmds:
-  #     - echo "✅ Configuration validée."
-  #   preconditions:
-  #     - sh: command -v qemu-system-aarch64
-  #       msg: "❌ 'qemu-system-aarch64' missing."
-  #     - sh: command -v butane
-  #       msg: "❌ 'butane' missing."
-  #     - sh: command -v shasum
-  #       msg: "❌ 'shasum' missing."
-  #     - sh: command -v jq
-  #       msg: "❌ 'jq' missing."
-  #     - sh: test -f "$QEMU_FIRMWARE_FILE"
-  #       msg: "❌ '$QEMU_FIRMWARE_FILE' file not found'."
-  #     - sh: test -f "$BUTANE_CONFIG_FILE"
-  #       msg: "❌ '$BUTANE_CONFIG_FILE' file not found."
-  #     - sh: '[ -n "$FEDORA_STREAM" ]'
-  #       msg: "❌ 'FEDORA_STREAM' is empty."
-  #     - sh: '[ -n "$FEDORA_VERSION" ]'
-  #       msg: "❌ 'FEDORA_VERSION' is empty."
-  #     - sh: '[ -n "$FEDORA_ARCH" ]'
-  #       msg: "❌ 'FEDORA_ARCH' is empty."
-  #     - sh: '[ -n "$QEMU_VM_ID" ]'
-  #       msg: "❌ 'QEMU_VM_ID' is empty."
-  #     - sh: '[ -n "$QEMU_VM_WORKSPACE" ]'
-  #       msg: "❌ 'QEMU_VM_WORKSPACE' is empty."
-  #     - sh: '[ -n "$QEMU_IMAGE_FILE" ]'
-  #       msg: "❌ 'QEMU_IMAGE_FILE' is empty."
-  #     - sh: '[ -n "$QEMU_IMAGE_URL" ]'
-  #       msg: "❌ 'QEMU_IMAGE_URL' is empty."
-  #     - sh: '[ -n "$QEMU_IMAGE_SHA256" ]'
-  #       msg: "❌ 'QEMU_IMAGE_SHA256' is empty."
-  #     - sh: '[ -n "$QEMU_VM_MEMORY" ]'
-  #       msg: "❌ 'QEMU_VM_MEMORY' is empty."
-  #     - sh: '[ -n "$QEMU_VM_CPU" ]'
-  #       msg: "❌ 'QEMU_VM_CPU' is empty."
-  #     - sh: '[ -n "$QEMU_PID_FILE" ]'
-  #       msg: "❌ 'QEMU_PID_FILE' is empty."
-  #     - sh: '[ -n "$QEMU_LOG_FILE" ]'
-  #       msg: "❌ 'QEMU_LOG_FILE' is empty."

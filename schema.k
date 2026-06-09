@@ -1,30 +1,68 @@
 import file
 import crypto
+import .templates as templates
 
 _taskfile_dir = option("taskfile_dir") or "."
-_username = option("qemu_butane_user_name") or "empty"
+_username = option("qemu_butane_user_name") or "null"
 _groupname = option("qemu_butane_group_name") or _username
 _uid = int(option("qemu_butane_user_id") or "1000")
+_uuid = file.read("${_taskfile_dir}/.uuid").strip() if file.exists("${_taskfile_dir}/.uuid") else crypto.uuid()
+_workspace = "${file.read_env('HOME')}/.qemu/${_uuid}"
+_host_os = option("qemu_host_os") or "null"
+_os_arch = option("qemu_host_arch") or "null"
+_os_name: str = "fedora"
+_os_edition: str = "coreos"
+_os_version: str = "44.20260419.3.1"
+_os_streams: str = "stable"
+_checksum_x86_64 = "4988775076f6b94f33c47243e2f0fbb3ecd412b6cd7ad492faa98d2d705e9035"
+_checksum_aarch64 = "d7a66a4a69d83208ecfda180650d5681da6f572bed9c491057862be1d77fa0f3"
 
 schema Qemu:
-    uuid: str = file.read("${_taskfile_dir}/.uuid").strip() if file.exists("${_taskfile_dir}/.uuid") else crypto.uuid()
-    workspace: str = "${file.read_env('HOME')}/.qemu/${uuid}"
+    uuid: str = "${_uuid}"
+    workspace: str = "${_workspace}"
+    host_os: str = "${_host_os}"
     os: Os {}
     checksum: Checksum {}
     hardware: Hardware {}
-    butane: Butane = Butane {
-        hostname = uuid
+    command: Command = Command {
+        options = [
+            "-name ${uuid}"
+            "-M ${'q35' if os.arch == 'x86_64' else 'virt,highmem=off'}"
+            "-accel ${'hvf' if host_os == 'darwin' else 'kvm'}"
+            "-cpu host"
+            "-smp ${hardware.cpu}"
+            "-m ${str(hardware.memory.size)}${hardware.memory.unit}"
+            "-display none"
+            "-daemonize"
+            "-nodefaults"
+            "-pidfile ${workspace}/qemu.pid"
+            "-device virtio-rng-pci"
+            "-drive if=pflash,format=raw,readonly=on,file=/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
+            "-drive if=virtio,format=qcow2,file=${workspace}/${os.name}-${os.edition}-${os.version}-${os.arch}.qcow2,cache=unsafe"
+            "-fw_cfg name=opt/com.coreos/config,file=${_taskfile_dir}/config.ign"
+            "-netdev vmnet-shared,id=net0" if host_os == "darwin" else "-netdev user,id=net0"
+            "-device virtio-net-pci,netdev=net0"
+            "-fsdev local,id=fsdev0,path=${workspace},security_model=passthrough"
+            "-device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu"
+            "-fsdev local,id=fsdev1,path=${file.read_env('PWD')},security_model=passthrough"
+            "-device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace"
+            "-fsdev local,id=fsdev2,path=${file.read_env('HOME')}/.config/starship,security_model=passthrough,readonly=on"
+            "-device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship"
+            "-serial file:${workspace}/qemu.log"
+        ]
     }
+    butane: Butane {}
 
 schema Os:
-    name: str = "fedora"
-    edition: str = "coreos"
-    version: str = "44"
-    streams: str = "stable"
+    arch: str = "${_os_arch}"
+    name: str = "${_os_name}"
+    edition: str = "${_os_edition}"
+    version: str = "${_os_version}"
+    streams: str = "${_os_streams}"
 
 schema Checksum:
-    x86_64: str = "empty"
-    aarch64: str = "empty"
+    x86_64: str = "${_checksum_x86_64}"
+    aarch64: str = "${_checksum_aarch64}"
 
 schema Hardware:
     cpu: int = 1
@@ -39,9 +77,14 @@ schema Disk:
     size: int = 16
     unit: str = "G"
 
+schema Command:
+    sudo: bool = True
+    binary: str = "qemu-system-${_os_arch}"
+    options: [str] = []
+
 schema Butane:
     user: ButaneUser = ButaneUser {}
-    hostname: str = hostname
+    hostname: str = "${_uuid}"
     default_pkgs: [str] = ["git", "terra-release", "topgrade", "mise"]
     custom_pkgs: [str] = []
     directories: [ButaneDirectory] = [
@@ -54,177 +97,59 @@ schema Butane:
         {
             path = "/etc/yum.repos.d/terra.repo"
             mode = 420
-            contents.inline = """\
-[terra]
-name=Terra $releasever
-baseurl=https://repos.fyralabs.com/terra$releasever
-type=rpm
-skip_if_unavailable=True
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://repos.fyralabs.com/terra$releasever/key.asc
-enabled=1
-enabled_metadata=1
-metadata_expire=4h
-"""
+            contents.inline = templates.etc_yum_repos_d_terra_repo()
         }
         {
             path = "/etc/hostname"
             mode = 420
-            contents.inline = """\
-${hostname}.local
-"""
+            contents.inline = templates.etc_hostname(hostname)
         }
         {
             path = "/etc/systemd/resolved.conf.d/mdns.conf"
             mode = 420
-            contents.inline = """\
-[Resolve]
-MulticastDNS=yes
-"""
+            contents.inline = templates.etc_systemd_resolved_conf_d_mdns_conf()
         }
         {
             path = "/etc/profile.d/terminal-fix.sh"
             mode = 420
-            contents.inline = """\
-export TERM=linux
-export SYSTEMD_PAGER=cat
-"""
+            contents.inline = templates.etc_profile_d_terminal_fix_sh()
         }
         {
             path = "/etc/sudoers.d/${user.name}"
             mode = 288
-            contents.inline = """\
-${user.name} ALL=(ALL) NOPASSWD: ALL
-"""
+            contents.inline = templates.etc_sudoers_d_user(user.name)
         }
-    ] + custom_files
-    custom_files: [ButaneFile] = []
+    ]
     units: [ButaneUnit] = [
         {
             name = "install-system-pkgs.service"
             enabled = True
-            contents = """\
-[Unit]
-Description=Provisioning System Packages
-ConditionVirtualization=qemu
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/bash -c ' \\
-    MISSING_PKGS=""; \\
-    for PKG in ${" ".join(default_pkgs + custom_pkgs)}; do \\
-        if ! rpm -q "$$PKG" &> /dev/null; then \\
-            MISSING_PKGS="$$MISSING_PKGS $$PKG"; \\
-        fi; \\
-    done; \\
-    if [ -n "$$MISSING_PKGS" ]; then \\
-        /usr/bin/rpm-ostree install --apply-live --allow-inactive $$MISSING_PKGS; \\
-    fi'
-
-[Install]
-WantedBy=multi-user.target
-"""
+            contents = templates.install_system_pkgs_service(default_pkgs, custom_pkgs)
         }
         {
             name = "var-home-${user.name}-.qemu.mount"
             enabled = True
-            contents = """\
-[Unit]
-Description=Mount QEMU project workspace
-ConditionVirtualization=qemu
-Before=extract-kernel.service
-
-[Mount]
-What=qemu
-Where=/var/home/${user.name}/.qemu
-Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
-
-[Install]
-WantedBy=multi-user.target
-"""
-        }
-        {
-            name = "extract-kernel.service"
-            enabled = True
-            contents = """\
-[Unit]
-Description=Extract Kernel and Initramfs for Host Direct Boot
-ConditionVirtualization=qemu
-Requires=var-home-${user.name}-.qemu.mount
-After=var-home-${user.name}-.qemu.mount
-ConditionPathExists=!/var/home/${user.name}/.qemu/kernels/vmlinuz
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStartPre=/usr/bin/mkdir -p /var/home/${user.name}/.qemu/kernels
-ExecStart=/usr/bin/bash -c ' \\
-    KVER=$$(uname -r); \\
-    cp /boot/ostree/*/vmlinuz-$$KVER /var/home/${user.name}/.qemu/kernels/vmlinuz && \\
-    cp /boot/ostree/*/initramfs-$$KVER.img /var/home/${user.name}/.qemu/kernels/initramfs'
-
-[Install]
-WantedBy=multi-user.target
-"""
+            contents = templates.var_home_user_qemu_mount(user.name)
         }
         {
             name = "var-home-${user.name}-workspace.mount"
             enabled = False
-            contents = """\
-[Unit]
-Description=Mount Host Shared Directory in Home
-ConditionVirtualization=qemu
-
-[Mount]
-What=workspace
-Where=/var/home/${user.name}/workspace
-Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
-"""
+            contents = templates.var_home_user_workspace_mount(user.name)
         }
         {
             name = "var-home-${user.name}-workspace.automount"
             enabled = True
-            contents = """\
-[Unit]
-Description=Automount Workspace Shared Directory in Home
-ConditionVirtualization=qemu
-
-[Automount]
-Where=/var/home/${user.name}/workspace
-
-[Install]
-WantedBy=multi-user.target
-"""
+            contents = templates.var_home_user_workspace_automount(user.name)
         }
         {
             name = "var-home-${user.name}-.config-starship.mount"
             enabled = True
-            contents = """\
-[Unit]
-Description=Mount Starship Config
-ConditionVirtualization=qemu
-
-[Mount]
-What=starship
-Where=/var/home/${user.name}/.config/starship
-Type=9p
-Options=trans=virtio,version=9p2000.L,ro,msize=104857600,cache=loose
-
-[Install]
-WantedBy=multi-user.target
-"""
+            contents = templates.var_home_user_config_starship_mount(user.name)
         }
-    ] + custom_units
-    custom_units: [ButaneUnit] = []
+    ]
 
 schema ButaneUser:
-    name: str = _username
+    name: str = "${_username}"
     uid: int = _uid
     default_ssh_key_path: str = "${file.read_env('HOME')}/.ssh/id_ed25519.pub"
     ssh_keys: [str] = [file.read(default_ssh_key_path).strip()] if file.exists(default_ssh_key_path) else []
