@@ -1,13 +1,13 @@
 etc_yum_repos_d_terra_repo = lambda -> str {
     """\
 [terra]
-name=Terra \$releasever
-baseurl=https://repos.fyralabs.com/terra\$releasever
+name=Terra $releasever
+baseurl=https://repos.fyralabs.com/terra$releasever
 type=rpm
 skip_if_unavailable=True
 gpgcheck=1
 repo_gpgcheck=1
-gpgkey=https://repos.fyralabs.com/terra\$releasever/key.asc
+gpgkey=https://repos.fyralabs.com/terra$releasever/key.asc
 enabled=1
 enabled_metadata=1
 metadata_expire=4h
@@ -40,6 +40,13 @@ ${username} ALL=(ALL) NOPASSWD: ALL
 """
 }
 
+etc_zincati_config_d_50_disable_updates_toml = lambda -> str {
+    """\
+[updates]
+enabled = false
+"""
+}
+
 install_system_pkgs_service = lambda default_pkgs: [str], custom_pkgs: [str] -> str {
     """\
 [Unit]
@@ -52,15 +59,17 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/bash -c ' \\
+    set -e; \\
     MISSING_PKGS=""; \\
     for PKG in ${" ".join(default_pkgs + custom_pkgs)}; do \\
-        if ! rpm -q "$$PKG" &> /dev/null; then \\
+        if ! rpm -q "$$PKG" > /dev/null 2>&1; then \\
             MISSING_PKGS="$$MISSING_PKGS $$PKG"; \\
         fi; \\
     done; \\
     if [ -n "$$MISSING_PKGS" ]; then \\
-        /usr/bin/rpm-ostree install --apply-live --allow-inactive $$MISSING_PKGS; \\
+        /usr/bin/rpm-ostree install --apply-live --allow-inactive $$MISSING_PKGS && sync; \\
     fi'
+
 
 [Install]
 WantedBy=multi-user.target
@@ -78,7 +87,21 @@ Before=extract-kernel.service
 What=qemu
 Where=/var/home/${username}/.qemu
 Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
+Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=loose
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
+var_home_user_qemu_automount = lambda username: str -> str {
+    """\
+[Unit]
+Description=Automount QEMU project workspace
+ConditionVirtualization=qemu
+
+[Automount]
+Where=/var/home/${username}/.qemu
 
 [Install]
 WantedBy=multi-user.target
@@ -95,7 +118,7 @@ ConditionVirtualization=qemu
 What=workspace
 Where=/var/home/${username}/workspace
 Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=104857600,cache=loose
+Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=loose
 """
 }
 
@@ -123,7 +146,7 @@ ConditionVirtualization=qemu
 What=starship
 Where=/var/home/${username}/.config/starship
 Type=9p
-Options=trans=virtio,version=9p2000.L,ro,msize=104857600,cache=loose
+Options=trans=virtio,version=9p2000.L,ro,msize=512000,cache=loose
 
 [Install]
 WantedBy=multi-user.target

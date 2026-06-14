@@ -74,7 +74,7 @@ schema Memory:
     unit: str = "M"
 
 schema Disk:
-    size: int = 16
+    size: int = 32
     unit: str = "G"
 
 schema Command:
@@ -92,8 +92,17 @@ schema Butane:
             path = "/var/home/${user.name}/.config"
             mode = 493
         }
+        {
+            path = "/var/home/${user.name}/.config/starship"
+            mode = 493
+        }
     ]
     files: [ButaneFile] = [
+        {
+            path = "/etc/zincati/config.d/50-disable-updates.toml"
+            mode = 420
+            contents.inline = templates.etc_zincati_config_d_50_disable_updates_toml()
+        }
         {
             path = "/etc/yum.repos.d/terra.repo"
             mode = 420
@@ -128,8 +137,13 @@ schema Butane:
         }
         {
             name = "var-home-${user.name}-.qemu.mount"
-            enabled = True
+            enabled = False
             contents = templates.var_home_user_qemu_mount(user.name)
+        }
+        {
+            name = "var-home-${user.name}-.qemu.automount"
+            enabled = True
+            contents = templates.var_home_user_qemu_automount(user.name)
         }
         {
             name = "var-home-${user.name}-workspace.mount"

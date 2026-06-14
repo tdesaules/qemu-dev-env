@@ -58,17 +58,46 @@ tasks:
       - task: resize-image
       - task: build-butane
       - task: build-ignition
-      - task: delete-pid
       - task: launch-vm
       - task: wait-ssh
+      - task: wait-provisionning
+      - task: connect-ssh
 
   down:
     desc: "QEMU : Destroy the virtual machine"
     cmds:
+      - task: stop-vm
+        vars:
+          force: "true"
       - task: delete-workspace
       - task: delete-uuid
       - task: delete-ignition
       - task: delete-butane
+
+  status:
+    desc: "QEMU : Get virtual machine status"
+    cmds:
+      - task: get-status
+
+  ssh:
+    desc: "QEMU : Connect virtual machine"
+    cmds:
+      - task: connect-ssh
+
+  logs:
+    desc: "QEMU : Get virtual machine logs"
+    cmds:
+      - task: get-logs
+
+  stop:
+    desc: "QEMU : Stop the virtual machine"
+    vars:
+      force: '{{ default "false" .force }}'
+    cmds:
+      - task: stop-vm
+        vars:
+          force: "{{ .force }}"
+      - task: delete-pid
 
   check-qemu:
     internal: true
@@ -172,9 +201,9 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "pull qemu image"
-        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
         OUTPUT="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
         URL="https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_host_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_host_arch}}.qcow2.xz"
+        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
         if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
         {{ .log }} "success" "image downloaded successfully"
 
@@ -188,19 +217,19 @@ tasks:
       - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | shasum --check --algorithm 256
     cmds:
       - |
-        {{ .log }} "title" ""
-        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
+        {{ .log }} "title" "check qemu image"
         OUTPUT="{{ .qemu_workspace }}/fedora.gpg"
         URL="https://fedoraproject.org/fedora.gpg"
-        if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
         {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
+        if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
         OUTPUT="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig"
         URL="https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_host_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_host_arch}}.qcow2.xz.sig"
+        {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
         if ! curl --silent --location --fail --retry 5 --output "$OUTPUT" "$URL" ; then {{ .error }} "faild to download \"$URL\" to \"$OUTPUT\""; fi
-        {{ .log }} "info" "gpgv --keyring \"$KEYRING\" \"$SIG\" \"$QCOW2\""
         KEYRING="{{ .qemu_workspace }}/fedora.gpg"
         SIG="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig"
         QCOW2="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+        {{ .log }} "info" "gpgv --keyring \"$KEYRING\" \"$SIG\" \"$QCOW2\""
         if ! gpgv --keyring "$KEYRING" "$SIG" "$QCOW2" > /dev/null 2>&1; then {{ .error }} "gpg signature verification failed"; fi
         {{ .log }} "info" "echo "{{ .qemu_checksum }}  $QCOW2" | shasum --check --algorithm 256"
         if ! echo "{{ .qemu_checksum }}  $QCOW2" | shasum --check --algorithm 256 > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
@@ -221,14 +250,29 @@ tasks:
   resize-image:
     internal: true
     silent: true
-    status:
-      - test {{ .qemu_hardware_disk_size }} -eq $(qemu-img info {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2 --output=json | jq -r '."virtual-size" / 1024 / 1024 / 1024')
     cmds:
       - |
-        {{ .log }} "title" "resize qemu disk"
-        {{ .log }} "info" "qemu-img resize {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2 {{ .qemu_hardware_disk_size }}{{ .qemu_hardware_disk_unit }}"
-        if ! qemu-img resize {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2 {{ .qemu_hardware_disk_size }}{{ .qemu_hardware_disk_unit }} > /dev/null 2>&1; then {{ .error }} "qemu disk rezise failed"; fi
-        {{ .log }} "success" "image extracted"
+        {{ .log }} "title" "check and resize qemu disk"
+        DISK_PATH="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2"
+        TARGET_SIZE={{ .qemu_hardware_disk_size }}
+        if ! qemu-img info "$DISK_PATH" > /dev/null 2>&1; then
+           {{ .log }} "warning" "disk is locked (VM likely running). skipping resize check."
+           exit 0
+        fi
+        if [ "$CURRENT_SIZE" -eq "$TARGET_SIZE" ]; then
+          {{ .log }} "success" "disk size is already correct (${CURRENT_SIZE}G)"
+          exit 0
+        fi
+        if [ "$CURRENT_SIZE" -gt "$TARGET_SIZE" ]; then
+          {{ .log }} "warning" "cannot shrink disk (Current: ${CURRENT_SIZE}G, Target: ${TARGET_SIZE}G). skipping."
+          exit 0
+        fi
+        {{ .log }} "info" "resizing disk from ${CURRENT_SIZE}G to ${TARGET_SIZE}G"
+        {{ .log }} "info" "qemu-img resize \"$DISK_PATH\" ${TARGET_SIZE}{{ .qemu_hardware_disk_unit }}"
+        if ! qemu-img resize "$DISK_PATH" ${TARGET_SIZE}{{ .qemu_hardware_disk_unit }} > /dev/null 2>&1; then
+          {{ .error }} "qemu disk resize failed"
+        fi
+        {{ .log }} "success" "disk resized successfully"
 
   build-butane:
     internal: true
@@ -313,36 +357,38 @@ tasks:
     internal: true
     silent: true
     status:
-      - test ! -f "{{ .qemu_workspace }}/qemu.pid"
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status == "running"' > /dev/null
     cmds:
       - |
-        {{ .log }} "title" "clean pid file"
+        {{ .log }} "title" "clean stale pid file"
         {{ .log }} "info" "rm -rf {{ .qemu_workspace }}/qemu.pid"
         if ! sudo rm -rf "{{ .qemu_workspace }}/qemu.pid"; then {{ .error }} "failed to delete \"{{ .qemu_workspace }}/qemu.pid\" file"; fi
-        {{ .log }} "success" "pid file deleted"
+        {{ .log }} "success" "stale pid file deleted"
 
   launch-vm:
     internal: true
     silent: true
     status:
-      - test -f "{{ .qemu_workspace }}/qemu.pid" && sudo kill -0 $(sudo cat "{{ .qemu_workspace }}/qemu.pid") 2> /dev/null
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status == "running"' > /dev/null
     cmds:
       - |
-        {{ .log }} "title" "init virtual machine"
-        {{ .log }} "info" ""
+        {{ .log }} "title" "launch virtual machine"
+        {{ .log }} "info" "sudo {{ .qemu_command_binary }} {{ .qemu_command_options }}"
         sudo {{ .qemu_command_binary }} {{ .qemu_command_options }}
         {{ .log }} "success" "virtual machine started"
 
   wait-ssh:
     internal: true
     silent: true
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
     cmds:
       - |
         {{ .log }} "title" "wait ssh accessible"
-        {{ .log }} "info" ""
         TIMEOUT=30
         COUNTER=0
-        until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+        {{ .log }} "info" "until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."
+        until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
         sleep 1
           COUNTER=$((COUNTER + 1))
           if [ $COUNTER -gt $TIMEOUT ]; then
@@ -355,104 +401,116 @@ tasks:
   wait-provisionning:
     internal: true
     silent: true
-    deps: []
-    status: []
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
     cmds:
       - |
         {{ .log }} "title" "wait provisionning virtual machine"
-        {{ .log }} "info" ""
-        PROVISION_TIMEOUT=300
-        PROVISION_COUNTER=0
-        VERIFY_CMD="test -f /usr/bin/git && \
-                    test -f /usr/local/bin/topgrade && \
-                    test -f /usr/local/bin/mise"
-        until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+        TIMEOUT=180
+        COUNTER=0
+        {{ .log }} "info" "until ssh -q -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null\" 2> /dev/null; do..."
+        until ssh -q -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null" 2> /dev/null; do
           sleep 1
-          PROVISION_COUNTER=$((PROVISION_COUNTER + 1))
-          if [ $PROVISION_COUNTER -gt $PROVISION_TIMEOUT ]; then
-            {{ .error }} "provisioning take too long after ${TIMEOUT}s"
+          PROVISION_COUNTER=$((COUNTER + 1))
+          if [ $COUNTER -gt $TIMEOUT ]; then
+            {{ .error }} "timeout: provisioning taking too long after ${TIMEOUT}s"
             exit 1
           fi
         done
-        {{ .log }} "success" "provisionning done"
+        if ssh -q -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed install-system-pkgs.service >/dev/null" 2> /dev/null; then
+          {{ .error }} "provisioning service FAILED. Check logs with: ssh {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local 'sudo journalctl -u install-system-pkgs.service'"
+          exit 1
+        fi
+        {{ .log }} "success" "provisionning completed successfully"
 
-      # status:
-      #   desc: "Return QEMU virtual machine status"
-      #   silent: true
-      #   cmds:
-      #     - |
-      #       STATE="stopped"
-      #       PID_VAL="null"
-      #       if [ -f "$QEMU_PID_FILE" ]; then
-      #         READ_PID=$(sudo cat "$QEMU_PID_FILE")
-      #         if sudo kill -0 "$READ_PID" 2>/dev/null; then
-      #           STATE="running"
-      #           PID_VAL="$READ_PID"
-      #         else
-      #           STATE="crashed"
-      #           PID_VAL="$READ_PID"
-      #         fi
-      #       fi
-      #       printf '{"id":"%s","status":"%s","pid":%s,"config":{"memory":"%s","cpu":"%s","image":"%s"}}\n' "$QEMU_VM_ID" "$STATE" "$PID_VAL" "$QEMU_VM_MEMORY" "$QEMU_VM_CPU" "$QEMU_IMAGE_FILE"
+  get-status:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        STATE="stopped"
+        PID_FILE="{{ .qemu_workspace }}/qemu.pid"
+        PID=""
+        if [ -f "$PID_FILE" ]; then
+          PID=$(sudo cat "$PID_FILE")
+          if sudo kill -0 "$PID" 2> /dev/null; then
+            STATE="running"
+          else
+            STATE="crashed"
+          fi
+        fi
+        printf '{"id":"%s","status":"%s","pid":"%s","config":{"memory":"%s","cpu":"%s","image":"%s"}}\n' \
+          "{{ .qemu_uuid }}" \
+          "$STATE" \
+          "$PID" \
+          "{{ .qemu_hardware_memory_size }}{{ .qemu_hardware_memory_unit }}" \
+          "{{ .qemu_hardware_cpu }}" \
+          "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2"
 
-  # stop:
-  #   desc: "Stop QEMU virtual machine"
-  #   silent: true
-  #   vars:
-  #     force: '{{default "false" .force}}'
-  #   cmds:
-  #     - |
-  #       JSON_OUTPUT=$(task qemu:status)
-  #       STATE=$(echo "$JSON_OUTPUT" | jq -r '.status')
-  #       PID=$(echo "$JSON_OUTPUT" | jq -r '.pid')
-  #       if [ "$STATE" == "running" ]; then
-  #         if [ "{{.force}}" == "true" ]; then
-  #           echo "Force killing VM..."
-  #           sudo kill -9 "$PID" 2>/dev/null || true
-  #         else
-  #           echo "Sending graceful shutdown signal via SSH..."
-  #           ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${QEMU_VM_USER}@${QEMU_VM_HOSTNAME} "sudo systemctl poweroff" 2>/dev/null || (echo "SSH unreachable, falling back to SIGTERM..." && sudo kill "$PID")
-  #           TIMEOUT=20
-  #           COUNTER=0
-  #           while sudo kill -0 "$PID" 2>/dev/null; do
-  #             sleep 1
-  #             COUNTER=$((COUNTER + 1))
-  #             if [ $COUNTER -gt $TIMEOUT ]; then
-  #               echo "Shutdown timeout, forcing kill..."
-  #               sudo kill -9 "$PID" 2>/dev/null || true
-  #               break
-  #             fi
-  #           done
-  #         fi
-  #         sudo rm -f "$QEMU_PID_FILE"
-  #         echo "VM stopped."
-  #       else
-  #         echo "VM is not running."
-  #         sudo rm -f "$QEMU_PID_FILE"
-  #       fi
+  connect-ssh:
+    internal: true
+    silent: true
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
+    cmds:
+      - |
+        {{ .log }} "title" "connect virtual machine using ssh"
+        STATE=$(task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -r '.status')
+        if [ "$STATE" != "running" ]; then
+          {{ .log }} "error" "QEMU virtual machine is not started."
+          exit 1
+        fi
+        {{ .log }} "info" "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local"
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local
 
-  # logs:
-  #   desc: "Tail QEMU virtual machine logs"
-  #   silent: true
-  #   deps: [check]
-  #   preconditions:
-  #     - sh: test -f "$QEMU_LOG_FILE"
-  #       msg: "'$QEMU_LOG_FILE' file is missing."
-  #   cmds:
-  #     - tail -f "$QEMU_LOG_FILE"
+  get-logs:
+    internal: true
+    silent: true
+    preconditions:
+      - sh: test -f "{{ .qemu_workspace }}/qemu.log"
+        msg: "'{{ .qemu_workspace }}/qemu.log' file is missing."
+    cmds:
+      - |
+        {{ .log }} "title" "tail virtual machine logs"
+        {{ .log }} "info" "tail -f {{ .qemu_workspace }}/qemu.log"
+        tail -f {{ .qemu_workspace }}/qemu.log
 
-  # ssh:
-  #   desc: "Connect to the virtual machine via ssh"
-  #   silent: true
-  #   deps: [check]
-  #   cmds:
-  #     - |
-  #       STATE=$(task qemu:status | jq -r '.status')
-  #       if [ "$STATE" != "running" ]; then
-  #         echo "QEMU virtual machine is not started."
-  #         exit 1
-  #       fi
-  #       echo "Clean old key..."
-  #       ssh-keygen -R $QEMU_VM_HOSTNAME 2>/dev/null
-  #       echo "Connexion to {QEMU_VM_USER}@${QEMU_VM_HOSTNAME}..."
-  #       ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${QEMU_VM_USER}@${QEMU_VM_HOSTNAME}
+  stop-vm:
+    internal: true
+    silent: true
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
+    vars:
+      force: '{{ default "false" .force }}'
+    cmds:
+      - |
+        {{ .log }} "title" "stop virtual machine"
+        JSON_OUTPUT=$(task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status)
+        STATE=$(echo "$JSON_OUTPUT" | jq -r '.status')
+        PID=$(echo "$JSON_OUTPUT" | jq -r '.pid')
+        if [ "$STATE" == "running" ]; then
+          if [ "{{ .force }}" == "true" ]; then
+            {{ .log }} "info" "sudo kill -9 "$PID" 2> /dev/null || true"
+            sudo kill -9 "$PID" 2> /dev/null || true
+          else
+            {{ .log }} "info" "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl poweroff\" 2> /dev/null || ({{ .log }} \"warning" "SSH unreachable, falling back to SIGTERM...\" && sudo kill \"$PID\")"
+            ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl poweroff" 2> /dev/null || ({{ .log }} "warning" "SSH unreachable, falling back to SIGTERM..." && sudo kill "$PID")
+            TIMEOUT=20
+            COUNTER=0
+            while sudo kill -0 "$PID" 2> /dev/null; do
+              sleep 1
+              COUNTER=$((COUNTER + 1))
+              if [ $COUNTER -gt $TIMEOUT ]; then
+                {{ .log }} "info" "sudo kill -9 "$PID" 2> /dev/null || true"
+                sudo kill -9 "$PID" 2> /dev/null || true
+                break
+              fi
+            done
+          fi
+          sudo rm -f "{{ .qemu_workspace }}/qemu.pid"
+          {{ .log }} "success" "VM stopped."
+        else
+          {{ .log }} "notice" "VM is not running"
+          {{ .log }} "info" "sudo rm -f {{ .qemu_workspace }}/qemu.pid"
+          sudo rm -f {{ .qemu_workspace }}/qemu.pid
+        fi
