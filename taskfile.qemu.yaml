@@ -93,6 +93,11 @@ tasks:
     cmds:
       - task: get-logs
 
+  mgmt:
+    desc: "QEMU : Open Cockpit web management console"
+    cmds:
+      - task: launch-cockpit
+
   stop:
     desc: "QEMU : Stop the virtual machine"
     vars:
@@ -469,7 +474,6 @@ tasks:
           REBOOT_NEEDED="true"
           {{ .log }} "warning" "staged updates detected reboot is required"
         fi
-
         if [ "$REBOOT_NEEDED" = "true" ]; then
           {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl reboot\""
           ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl reboot" 2>/dev/null || true
@@ -575,4 +579,18 @@ tasks:
             done
           fi
           {{ .log }} "success" "VM stopped."
+        fi
+
+  launch-cockpit:
+    internal: true
+    silent: true
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
+    cmds:
+      - |
+        {{ .log }} "title" "opening Cockpit web console: https://{{ .qemu_uuid }}.local:9090"
+        if [ "{{ .qemu_host_os }}" = "darwin" ]; then
+          open "https://{{ .qemu_uuid }}.local:9090"
+        else
+          xdg-open "https://{{ .qemu_uuid }}.local:9090" 2>/dev/null || {{ .log }} "warning" "could not open browser. Please navigate to https://{{ .qemu_uuid }}.local:9090"
         fi

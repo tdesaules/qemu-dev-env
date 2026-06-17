@@ -98,7 +98,15 @@ schema Command:
 schema Butane:
     user: ButaneUser = ButaneUser {}
     hostname: str = "${_uuid}"
-    default_pkgs: [str] = ["git", "terra-release", "topgrade", "mise"]
+    default_pkgs: [str] = [
+        "git"
+        "terra-release"
+        "topgrade"
+        "mise"
+        "cockpit-ws"
+        "cockpit-system"
+        "cockpit-ostree"
+    ]
     custom_pkgs: [str] = []
     github_token: str = ""
     default_mise_tools: {str:str} = {
@@ -205,19 +213,29 @@ schema Butane:
         {
             path = "/etc/subuid"
             mode = 420
-            contents.inline = "${user.name}:100000:65536\n"
+            contents.inline = templates.etc_subuid(user.name)
         }
         {
             path = "/etc/subgid"
             mode = 420
-            contents.inline = "${user.name}:100000:65536\n"
+            contents.inline = templates.etc_subgid(user.name)
         }
         {
             path = "/var/home/${user.name}/.hushlogin"
             mode = 420
             user = {}
             group = {}
-            contents.inline = ""
+            contents.inline = templates.var_home_user_hushlogin()
+        }
+        {
+            path = "/etc/sudoers.d/dev"
+            mode = 288
+            contents.inline = templates.etc_sudoers_d_user("dev")
+        }
+        {
+            path = "/etc/selinux/config"
+            mode = 420
+            contents.inline = templates.etc_selinux_config()
         }
     ]
     units = [
@@ -250,6 +268,11 @@ schema Butane:
             name = "var-home-${user.name}-workspace.automount"
             enabled = True
             contents = templates.var_home_user_workspace_automount(user.name)
+        }
+        {
+            name = "configure-cockpit.service"
+            enabled = True
+            contents = templates.configure_cockpit_service()
         }
     ] + ([
         {
@@ -296,5 +319,4 @@ schema ButaneFileContents:
 schema ButaneUnit:
     name: str
     enabled: bool = True
-    contents: str
-
+    contents?: str

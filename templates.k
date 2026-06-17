@@ -67,6 +67,7 @@ ExecStart=/usr/bin/bash -c ' \\
         fi; \\
     done; \\
     if [ -n "$$MISSING_PKGS" ]; then \\
+        /usr/sbin/setenforce 0 || true; \\
         /usr/bin/rpm-ostree install --apply-live --allow-inactive $$MISSING_PKGS && sync; \\
     fi'
 
@@ -232,3 +233,48 @@ polkit.addRule(function(action, subject) {
 });
 """
 }
+
+etc_subuid = lambda username: str -> str {
+    """\
+${username}:100000:65536
+"""
+}
+
+etc_subgid = lambda username: str -> str {
+    """\
+${username}:100000:65536
+"""
+}
+
+var_home_user_hushlogin = lambda -> str {
+    ""
+}
+
+etc_selinux_config = lambda -> str {
+    """\
+SELINUX=permissive
+SELINUXTYPE=targeted
+"""
+}
+
+configure_cockpit_service = lambda -> str {
+    """\
+[Unit]
+Description=Configure and Enable Cockpit Service
+After=install-system-pkgs.service
+Wants=install-system-pkgs.service
+ConditionPathExists=/usr/lib/systemd/system/cockpit.socket
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash -c ' \\
+    /usr/bin/systemctl daemon-reload; \\
+    /usr/bin/systemctl enable cockpit.socket; \\
+    /usr/bin/systemctl start cockpit.socket || true'
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
