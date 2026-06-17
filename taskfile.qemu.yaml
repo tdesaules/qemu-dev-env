@@ -34,6 +34,7 @@ vars:
   qemu_hardware_disk_size: "{{ ( .kcl_dataset | fromJson ).config.hardware.disk.size }}"
   qemu_command_binary: "{{ ( .kcl_dataset | fromJson ).config.command.binary }}"
   qemu_command_options: '{{ ( .kcl_dataset | fromJson ).config.command.options | join " " }}'
+  qemu_github_token: '{{ ( .kcl_dataset | fromJson ).config.butane.github_token | default (env "GITHUB_TOKEN") }}'
 
 tasks:
   check:
@@ -60,7 +61,9 @@ tasks:
       - task: build-ignition
       - task: launch-vm
       - task: wait-ssh
-      - task: wait-provisionning
+      - task: wait-rpm-install
+      - task: wait-topgrade
+      - task: reboot
       - task: connect-ssh
 
   down:
@@ -267,7 +270,6 @@ tasks:
           {{ .log }} "warning" "cannot shrink disk (Current: ${CURRENT_SIZE}G, Target: ${TARGET_SIZE}G). skipping."
           exit 0
         fi
-        {{ .log }} "info" "resizing disk from ${CURRENT_SIZE}G to ${TARGET_SIZE}G"
         {{ .log }} "info" "qemu-img resize \"$DISK_PATH\" ${TARGET_SIZE}{{ .qemu_hardware_disk_unit }}"
         if ! qemu-img resize "$DISK_PATH" ${TARGET_SIZE}{{ .qemu_hardware_disk_unit }} > /dev/null 2>&1; then
           {{ .error }} "qemu disk resize failed"
@@ -387,8 +389,8 @@ tasks:
         {{ .log }} "title" "wait ssh accessible"
         TIMEOUT=30
         COUNTER=0
-        {{ .log }} "info" "until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."
-        until ssh -q -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
+        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."
+        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
         sleep 1
           COUNTER=$((COUNTER + 1))
           if [ $COUNTER -gt $TIMEOUT ]; then
@@ -398,30 +400,94 @@ tasks:
         done
         {{ .log }} "success" "ssh server is ready and accepting connections"
 
-  wait-provisionning:
+  wait-rpm-install:
     internal: true
     silent: true
     status:
       - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
     cmds:
       - |
-        {{ .log }} "title" "wait provisionning virtual machine"
+        {{ .log }} "title" "wait rpm packages installation"
         TIMEOUT=180
         COUNTER=0
-        {{ .log }} "info" "until ssh -q -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null\" 2> /dev/null; do..."
-        until ssh -q -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null" 2> /dev/null; do
+        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null\" 2> /dev/null; do..."
+        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null" 2> /dev/null; do
           sleep 1
-          PROVISION_COUNTER=$((COUNTER + 1))
+          COUNTER=$((COUNTER + 1))
           if [ $COUNTER -gt $TIMEOUT ]; then
-            {{ .error }} "timeout: provisioning taking too long after ${TIMEOUT}s"
+            {{ .error }} "timeout: rpm installation taking too long after ${TIMEOUT}s"
             exit 1
           fi
         done
-        if ssh -q -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed install-system-pkgs.service >/dev/null" 2> /dev/null; then
-          {{ .error }} "provisioning service FAILED. Check logs with: ssh {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local 'sudo journalctl -u install-system-pkgs.service'"
+        if ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed install-system-pkgs.service >/dev/null" 2> /dev/null; then
+          {{ .error }} "rpm installation service FAILED. Check logs with: ssh {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local 'sudo journalctl -u install-system-pkgs.service'"
           exit 1
         fi
-        {{ .log }} "success" "provisionning completed successfully"
+        {{ .log }} "success" "rpm installation completed successfully"
+
+  wait-topgrade:
+    internal: true
+    silent: true
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
+    cmds:
+      - |
+        {{ .log }} "title" "wait topgrade updates virtual machine"
+        TIMEOUT=300
+        COUNTER=0
+        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active run-topgrade.service > /dev/null || systemctl is-failed run-topgrade.service > /dev/null\" 2> /dev/null; do..."
+        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active run-topgrade.service > /dev/null || systemctl is-failed run-topgrade.service > /dev/null" 2> /dev/null; do
+          sleep 1
+          COUNTER=$((COUNTER + 1))
+          if [ $COUNTER -gt $TIMEOUT ]; then
+            {{ .error }} "timeout: topgrade taking too long after ${TIMEOUT}s"
+            exit 1
+          fi
+        done
+        if ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed run-topgrade.service >/dev/null" 2> /dev/null; then
+          {{ .error }} "topgrade service FAILED. Check logs with: ssh {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local 'sudo journalctl -u run-topgrade.service'"
+          exit 1
+        fi
+        {{ .log }} "success" "topgrade completed successfully"
+
+  reboot:
+    internal: true
+    silent: true
+    vars:
+      force: '{{ default "false" .force }}'
+    status:
+      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
+    cmds:
+      - |
+        {{ .log }} "title" "check for staged updates and reboot if needed"
+        REBOOT_NEEDED="false"
+        if [ "{{ .force }}" = "true" ]; then
+          REBOOT_NEEDED="true"
+          {{ .log }} "warning" "forced reboot requested"
+        elif ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "rpm-ostree status --json" | jq -e '.deployments[0].booted == false' >/dev/null 2>&1; then
+          REBOOT_NEEDED="true"
+          {{ .log }} "warning" "REBOOT REQUIRED: staged updates detected"
+        fi
+
+        if [ "$REBOOT_NEEDED" = "true" ]; then
+          {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl reboot\""
+          ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl reboot" 2>/dev/null || true
+          sleep 1
+          TIMEOUT=45
+          COUNTER=0
+          {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."
+          until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+            if [ $COUNTER -gt $TIMEOUT ]; then
+              {{ .error }} "timeout: ssh server not reachable after reboot"
+              exit 1
+            fi
+          done
+          {{ .log }} "success" "virtual machine successfully rebooted and back online"
+        else
+          {{ .log }} "success" "no staged updates. no reboot needed"
+        fi
 
   get-status:
     internal: true
@@ -460,8 +526,8 @@ tasks:
           {{ .log }} "error" "QEMU virtual machine is not started."
           exit 1
         fi
-        {{ .log }} "info" "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local"
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local
+        {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local"
+        ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local
 
   get-logs:
     internal: true

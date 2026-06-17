@@ -76,6 +76,27 @@ WantedBy=multi-user.target
 """
 }
 
+run_topgrade_service = lambda username: str, github_token: str -> str {
+    """\
+[Unit]
+Description=Topgrade System and User Tools Update
+ConditionVirtualization=qemu
+After=install-system-pkgs.service
+Wants=install-system-pkgs.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=${username}
+Environment="HOME=/var/home/${username}" "GITHUB_TOKEN=${github_token}"
+ExecStart=/usr/bin/topgrade --config /var/home/${username}/.config/topgrade.toml
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
 var_home_user_qemu_mount = lambda username: str -> str {
     """\
 [Unit]
@@ -150,5 +171,64 @@ Options=trans=virtio,version=9p2000.L,ro,msize=512000,cache=loose
 
 [Install]
 WantedBy=multi-user.target
+"""
+}
+
+var_home_user_config_mise_config_toml = lambda tools: {str:str} -> str {
+    _lines = ["[tools]"] + ["\"${k}\" = \"${v}\"" for k, v in tools if v]
+    "\n".join(_lines) + "\n"
+}
+
+var_home_user_config_topgrade_toml = lambda -> str {
+    """\
+[misc]
+assume_yes = true
+cleanup = true
+no_self_update = true
+disable = ["mise", "firmware", "containers", "toolbx"]
+
+[commands]
+"Mise" = "mise install --yes"
+"""
+}
+
+var_home_user_bashrc_d_00_mise_sh = lambda username: str, github_token: str -> str {
+    _token_line = ["export GITHUB_TOKEN=\"${github_token}\""] if github_token else []
+    _mise_line = [
+        """\
+if [[ $- == *i* ]] && [ "$USER" = "${username}" ] && command -v mise >/dev/null 2>&1; then
+    eval "$(mise activate bash)"
+fi\
+"""
+    ]
+    "\n".join(_token_line + _mise_line) + "\n"
+}
+
+var_home_user_bashrc_d_10_starship_sh = lambda username: str -> str {
+    """\
+if [[ $- == *i* ]] && [ "$USER" = "${username}" ]; then
+    export STARSHIP_CONFIG="/var/home/${username}/.config/starship/starship.toml"
+    if command -v starship >/dev/null 2>&1; then
+        eval "$(starship init bash)"
+    fi
+fi
+"""
+}
+
+var_home_user_bashrc_d_20_fastfetch_sh = lambda username: str -> str {
+    """\
+if [[ $- == *i* ]] && [ "$USER" = "${username}" ] && command -v fastfetch >/dev/null 2>&1; then
+    fastfetch
+fi
+"""
+}
+
+etc_polkit_1_rules_d_99_rpmostree_passwordless_rules = lambda -> str {
+    """\
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.projectatomic.rpmostree1.") == 0 && subject.isInGroup("wheel")) {
+        return polkit.Result.YES;
+    }
+});
 """
 }

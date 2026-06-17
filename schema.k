@@ -12,10 +12,10 @@ _host_os = option("qemu_host_os") or "null"
 _os_arch = option("qemu_host_arch") or "null"
 _os_name: str = "fedora"
 _os_edition: str = "coreos"
-_os_version: str = "44.20260419.3.1"
+_os_version: str = "44.20260523.3.1"
 _os_streams: str = "stable"
-_checksum_x86_64 = "4988775076f6b94f33c47243e2f0fbb3ecd412b6cd7ad492faa98d2d705e9035"
-_checksum_aarch64 = "d7a66a4a69d83208ecfda180650d5681da6f572bed9c491057862be1d77fa0f3"
+_checksum_x86_64 = "b62d2628784723c342be8761e6d02900413f94670e7d41cf498d4c35c8befeb7"
+_checksum_aarch64 = "8afa8aafd8c53a12cdf9fb31d126abb7f4269fed780cac7f30f088b3afc19c9b"
 
 schema Qemu:
     uuid: str = "${_uuid}"
@@ -87,7 +87,18 @@ schema Butane:
     hostname: str = "${_uuid}"
     default_pkgs: [str] = ["git", "terra-release", "topgrade", "mise"]
     custom_pkgs: [str] = []
-    directories: [ButaneDirectory] = [
+    github_token: str = ""
+    default_mise_tools: {str:str} = {
+        "github:starship/starship" = "latest"
+        "github:fastfetch-cli/fastfetch" = "latest"
+    }
+    custom_mise_tools: {str:str} = {}
+    mise_tools: {str:str} = default_mise_tools | custom_mise_tools
+    directories: [ButaneDirectory]
+    files: [ButaneFile]
+    units: [ButaneUnit]
+
+    directories = [
         {
             path = "/var/home/${user.name}/.config"
             mode = 493
@@ -96,8 +107,18 @@ schema Butane:
             path = "/var/home/${user.name}/.config/starship"
             mode = 493
         }
+        {
+            path = "/var/home/${user.name}/.config/mise"
+            mode = 493
+        }
+        {
+            path = "/var/home/${user.name}/.bashrc.d"
+            mode = 493
+            user = {}
+            group = {}
+        }
     ]
-    files: [ButaneFile] = [
+    files = [
         {
             path = "/etc/zincati/config.d/50-disable-updates.toml"
             mode = 420
@@ -128,12 +149,74 @@ schema Butane:
             mode = 288
             contents.inline = templates.etc_sudoers_d_user(user.name)
         }
+        {
+            path = "/var/home/${user.name}/.config/mise/config.toml"
+            mode = 420
+            user = {}
+            group = {}
+            contents.inline = templates.var_home_user_config_mise_config_toml(mise_tools)
+        }
+        {
+            path = "/var/home/${user.name}/.config/topgrade.toml"
+            mode = 420
+            user = {}
+            group = {}
+            contents.inline = templates.var_home_user_config_topgrade_toml()
+        }
+        {
+            path = "/var/home/${user.name}/.bashrc.d/00-mise.sh"
+            mode = 420
+            user = {}
+            group = {}
+            contents.inline = templates.var_home_user_bashrc_d_00_mise_sh(user.name, github_token)
+        }
+        {
+            path = "/var/home/${user.name}/.bashrc.d/10-starship.sh"
+            mode = 420
+            user = {}
+            group = {}
+            contents.inline = templates.var_home_user_bashrc_d_10_starship_sh(user.name)
+        }
+        {
+            path = "/var/home/${user.name}/.bashrc.d/20-fastfetch.sh"
+            mode = 420
+            user = {}
+            group = {}
+            contents.inline = templates.var_home_user_bashrc_d_20_fastfetch_sh(user.name)
+        }
+        {
+            path = "/etc/polkit-1/rules.d/99-rpmostree-passwordless.rules"
+            mode = 420
+            contents.inline = templates.etc_polkit_1_rules_d_99_rpmostree_passwordless_rules()
+        }
+        {
+            path = "/etc/subuid"
+            mode = 420
+            contents.inline = "${user.name}:100000:65536\n"
+        }
+        {
+            path = "/etc/subgid"
+            mode = 420
+            contents.inline = "${user.name}:100000:65536\n"
+        }
+        {
+            path = "/var/home/${user.name}/.hushlogin"
+            mode = 420
+            user = {}
+            group = {}
+            contents.inline = ""
+        }
     ]
-    units: [ButaneUnit] = [
+    units = [
         {
             name = "install-system-pkgs.service"
             enabled = True
             contents = templates.install_system_pkgs_service(default_pkgs, custom_pkgs)
+        }
+        {
+            name = "run-topgrade.service"
+            enabled = True
+            contents = templates.run_topgrade_service(user.name, github_token)
         }
         {
             name = "var-home-${user.name}-.qemu.mount"
@@ -172,7 +255,15 @@ schema ButaneFile:
     path: str
     mode: int
     overwrite: bool = True
+    user?: ButaneFileUser
+    group?: ButaneFileGroup
     contents: ButaneFileContents
+
+schema ButaneFileUser:
+    name: str = _username
+
+schema ButaneFileGroup:
+    name: str = _groupname
 
 schema ButaneDirectory:
     path: str

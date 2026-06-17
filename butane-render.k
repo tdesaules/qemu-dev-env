@@ -12,6 +12,7 @@ butane = {
         {
             name = qemu.butane.user.name
             uid = qemu.butane.user.uid
+            groups = ["wheel", "docker"]
             ssh_authorized_keys = [*qemu.butane.user.ssh_keys]
         }
     ]
