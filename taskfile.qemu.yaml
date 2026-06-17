@@ -18,7 +18,8 @@ vars:
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
         --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
         --argument qemu_host_arch='{{ .qemu_host_arch }}' \
-        --argument qemu_host_os='{{ .qemu_host_os }}'
+        --argument qemu_host_os='{{ .qemu_host_os }}' \
+        --argument github_token='{{ env "GITHUB_TOKEN" }}'
     cache: true
   qemu_uuid: "{{ ( .kcl_dataset | fromJson ).config.uuid }}"
   qemu_workspace: "{{ ( .kcl_dataset | fromJson ).config.workspace }}"
@@ -108,9 +109,9 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "check qemu binary"
-        {{ .log }} "info" "command -v qemu-system-aarch64"
-        if ! command -v qemu-system-aarch64 > /dev/null 2>&1 ; then {{ .error }} "can't find \"qemu-system-aarch64\" binary" ; fi
-        {{ .log }} "success" "\"qemu-system-aarch64\" binary available"
+        {{ .log }} "info" "command -v {{ .qemu_command_binary }}"
+        if ! command -v {{ .qemu_command_binary }} > /dev/null 2>&1 ; then {{ .error }} "can't find \"{{ .qemu_command_binary }}\" binary" ; fi
+        {{ .log }} "success" "\"{{ .qemu_command_binary }}\" binary available"
 
   check-butane:
     internal: true
@@ -258,10 +259,11 @@ tasks:
         {{ .log }} "title" "check and resize qemu disk"
         DISK_PATH="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2"
         TARGET_SIZE={{ .qemu_hardware_disk_size }}
-        if ! qemu-img info "$DISK_PATH" > /dev/null 2>&1; then
-           {{ .log }} "warning" "disk is locked (VM likely running). skipping resize check."
+        if ! CURRENT_SIZE_BYTES=$(qemu-img info -U --output=json "$DISK_PATH" | jq -e '.["virtual-size"]' 2>/dev/null); then
+           {{ .log }} "warning" "could not determine disk size. skipping resize check."
            exit 0
         fi
+        CURRENT_SIZE=$(( CURRENT_SIZE_BYTES / 1024 / 1024 / 1024 ))
         if [ "$CURRENT_SIZE" -eq "$TARGET_SIZE" ]; then
           {{ .log }} "success" "disk size is already correct (${CURRENT_SIZE}G)"
           exit 0
@@ -288,8 +290,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "build butane"
-        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --path_selector butane"
-        if ! kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
+        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --path_selector butane"
+        if ! kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
         {{ .log }} "success" "butane configuration generated"
 
   build-ignition:
@@ -326,8 +328,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "delete .uuid file"
-        {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/.uuid"
-        if ! rm -rf "{{ .TASKFILE_DIR }}/.uuid"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/.uuid\" file"; fi
+        {{ .log }} "info" "rm -f {{ .TASKFILE_DIR }}/.uuid"
+        if ! rm -f "{{ .TASKFILE_DIR }}/.uuid"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/.uuid\" file"; fi
         {{ .log }} "success" ".uuid file deleted"
 
   delete-ignition:
@@ -338,9 +340,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "delete ignition file"
-        {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.ign"
-        if ! rm -rf "{{ .TASKFILE_DIR }}/config.ign"; then {{ .error }} "failed to delete \" file"; fi
-        if ! rm -rf "{{ .TASKFILE_DIR }}/config.ign"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/config.ign\" file"; fi
+        {{ .log }} "info" "rm -f {{ .TASKFILE_DIR }}/config.ign"
+        if ! rm -f "{{ .TASKFILE_DIR }}/config.ign"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/config.ign\" file"; fi
         {{ .log }} "success" "ignition file deleted"
 
   delete-butane:
@@ -351,20 +352,20 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "delete butane file"
-        {{ .log }} "info" "rm -rf {{ .TASKFILE_DIR }}/config.bu"
-        if ! rm -rf "{{ .TASKFILE_DIR }}/config.bu"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/config.bu\" file"; fi
+        {{ .log }} "info" "rm -f {{ .TASKFILE_DIR }}/config.bu"
+        if ! rm -f "{{ .TASKFILE_DIR }}/config.bu"; then {{ .error }} "failed to delete \"{{ .TASKFILE_DIR }}/config.bu\" file"; fi
         {{ .log }} "success" "butane file deleted"
 
   delete-pid:
     internal: true
     silent: true
     status:
-      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status == "running"' > /dev/null
+      - test ! -f "{{ .qemu_workspace }}/qemu.pid"
     cmds:
       - |
         {{ .log }} "title" "clean stale pid file"
-        {{ .log }} "info" "rm -rf {{ .qemu_workspace }}/qemu.pid"
-        if ! sudo rm -rf "{{ .qemu_workspace }}/qemu.pid"; then {{ .error }} "failed to delete \"{{ .qemu_workspace }}/qemu.pid\" file"; fi
+        {{ .log }} "info" "rm -f {{ .qemu_workspace }}/qemu.pid"
+        if ! sudo rm -f "{{ .qemu_workspace }}/qemu.pid"; then {{ .error }} "failed to delete \"{{ .qemu_workspace }}/qemu.pid\" file"; fi
         {{ .log }} "success" "stale pid file deleted"
 
   launch-vm:
@@ -466,7 +467,7 @@ tasks:
           {{ .log }} "warning" "forced reboot requested"
         elif ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "rpm-ostree status --json" | jq -e '.deployments[0].booted == false' >/dev/null 2>&1; then
           REBOOT_NEEDED="true"
-          {{ .log }} "warning" "REBOOT REQUIRED: staged updates detected"
+          {{ .log }} "warning" "staged updates detected reboot is required"
         fi
 
         if [ "$REBOOT_NEEDED" = "true" ]; then
@@ -573,10 +574,5 @@ tasks:
               fi
             done
           fi
-          sudo rm -f "{{ .qemu_workspace }}/qemu.pid"
           {{ .log }} "success" "VM stopped."
-        else
-          {{ .log }} "notice" "VM is not running"
-          {{ .log }} "info" "sudo rm -f {{ .qemu_workspace }}/qemu.pid"
-          sudo rm -f {{ .qemu_workspace }}/qemu.pid
         fi

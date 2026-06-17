@@ -17,6 +17,15 @@ _os_streams: str = "stable"
 _checksum_x86_64 = "b62d2628784723c342be8761e6d02900413f94670e7d41cf498d4c35c8befeb7"
 _checksum_aarch64 = "8afa8aafd8c53a12cdf9fb31d126abb7f4269fed780cac7f30f088b3afc19c9b"
 
+_edk2_path = option("qemu_edk2_path") or ("/opt/homebrew/share/qemu/edk2-aarch64-code.fd" if _host_os == "darwin" else "/usr/share/qemu/edk2-aarch64-code.fd")
+_starship_config_dir = "${file.read_env('HOME')}/.config/starship"
+_has_starship = file.exists(_starship_config_dir)
+_ssh_key_paths = [
+    "${file.read_env('HOME')}/.ssh/id_ed25519.pub"
+    "${file.read_env('HOME')}/.ssh/id_rsa.pub"
+]
+_existing_ssh_keys = [file.read(p).strip() for p in _ssh_key_paths if file.exists(p)]
+
 schema Qemu:
     uuid: str = "${_uuid}"
     workspace: str = "${_workspace}"
@@ -37,7 +46,9 @@ schema Qemu:
             "-nodefaults"
             "-pidfile ${workspace}/qemu.pid"
             "-device virtio-rng-pci"
-            "-drive if=pflash,format=raw,readonly=on,file=/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
+            *([
+                "-drive if=pflash,format=raw,readonly=on,file=${_edk2_path}"
+            ] if os.arch == "aarch64" and _edk2_path else [])
             "-drive if=virtio,format=qcow2,file=${workspace}/${os.name}-${os.edition}-${os.version}-${os.arch}.qcow2,cache=unsafe"
             "-fw_cfg name=opt/com.coreos/config,file=${_taskfile_dir}/config.ign"
             "-netdev vmnet-shared,id=net0" if host_os == "darwin" else "-netdev user,id=net0"
@@ -46,8 +57,10 @@ schema Qemu:
             "-device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu"
             "-fsdev local,id=fsdev1,path=${file.read_env('PWD')},security_model=passthrough"
             "-device virtio-9p-pci,fsdev=fsdev1,mount_tag=workspace"
-            "-fsdev local,id=fsdev2,path=${file.read_env('HOME')}/.config/starship,security_model=passthrough,readonly=on"
-            "-device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship"
+            *([
+                "-fsdev local,id=fsdev2,path=${_starship_config_dir},security_model=passthrough,readonly=on"
+                "-device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship"
+            ] if _has_starship else [])
             "-serial file:${workspace}/qemu.log"
         ]
     }
@@ -238,18 +251,18 @@ schema Butane:
             enabled = True
             contents = templates.var_home_user_workspace_automount(user.name)
         }
+    ] + ([
         {
             name = "var-home-${user.name}-.config-starship.mount"
             enabled = True
             contents = templates.var_home_user_config_starship_mount(user.name)
         }
-    ]
+    ] if _has_starship else [])
 
 schema ButaneUser:
     name: str = "${_username}"
     uid: int = _uid
-    default_ssh_key_path: str = "${file.read_env('HOME')}/.ssh/id_ed25519.pub"
-    ssh_keys: [str] = [file.read(default_ssh_key_path).strip()] if file.exists(default_ssh_key_path) else []
+    ssh_keys: [str] = _existing_ssh_keys
 
 schema ButaneFile:
     path: str
