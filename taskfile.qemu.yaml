@@ -73,8 +73,7 @@ tasks:
       - task: stop-vm
         vars:
           force: "true"
-      - task: delete-workspace
-      - task: delete-uuid
+      - task: delete-vm
       - task: delete-ignition
       - task: delete-butane
 
@@ -210,6 +209,13 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "pull qemu image"
+        EXPECTED_FILE="{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+        for f in "{{ .qemu_workspace }}"/*.qcow2.xz; do \
+            if [ -f "$$f" ] && [ "$$(basename "$$f")" != "$$EXPECTED_FILE" ]; then \
+                {{ .log }} "warning" "Found outdated base image: $$(basename "$$f"). Deleting." ; \
+                rm -f "$$f" "$${f}.sig" "{{ .qemu_workspace }}/fedora.gpg" ; \
+            fi; \
+        done
         OUTPUT="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
         URL="https://builds.coreos.fedoraproject.org/prod/streams/{{ .qemu_os_streams }}/builds/{{ .qemu_os_version }}/{{ .qemu_host_arch }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-qemu.{{.qemu_host_arch}}.qcow2.xz"
         {{ .log }} "info" "curl --silent --location --fail --retry 5 --output \"$OUTPUT\" \"$URL\""
@@ -248,13 +254,15 @@ tasks:
     internal: true
     silent: true
     status:
-      - test -f "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2"
+      - test -f "{{ .qemu_workspace }}/qemu.qcow2"
     cmds:
       - |
         {{ .log }} "title" "extract image"
-        {{ .log }} "info" "unxz --keep --verbose {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
-        if ! unxz --keep --verbose {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
-        {{ .log }} "success" "image extracted"
+        {{ .log }} "info" "unxz --keep {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
+        if ! unxz --keep "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" > /dev/null 2>&1; then {{ .error }} "extraction failed"; fi
+        {{ .log }} "info" "mv \"{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2\" \"{{ .qemu_workspace }}/qemu.qcow2\""
+        mv "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2" "{{ .qemu_workspace }}/qemu.qcow2"
+        {{ .log }} "success" "image extracted and renamed to qemu.qcow2"
 
   resize-image:
     internal: true
@@ -262,7 +270,7 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "check and resize qemu disk"
-        DISK_PATH="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2"
+        DISK_PATH="{{ .qemu_workspace }}/qemu.qcow2"
         TARGET_SIZE={{ .qemu_hardware_disk_size }}
         if ! CURRENT_SIZE_BYTES=$(qemu-img info -U --output=json "$DISK_PATH" | jq -e '.["virtual-size"]' 2>/dev/null); then
            {{ .log }} "warning" "could not determine disk size. skipping resize check."
@@ -313,17 +321,23 @@ tasks:
         if !  butane --strict {{ .TASKFILE_DIR }}/config.bu --output {{ .TASKFILE_DIR }}/config.ign > /dev/null 2>&1; then {{ .error }} "ignition config failed"; fi
         {{ .log }} "success" "ignition configuration generated"
 
-  delete-workspace:
+  delete-vm:
     internal: true
     silent: true
     status:
-      - test ! -d "{{ .qemu_workspace }}"
+      - test ! -f "{{ .qemu_workspace }}/qemu.qcow2"
+      - test ! -f "{{ .qemu_workspace }}/qemu.pid"
+      - test ! -f "{{ .qemu_workspace }}/qemu.log"
     cmds:
       - |
-        {{ .log }} "title" "delete workspace"
-        {{ .log }} "info" "rm -rf \"{{ .qemu_workspace }}\""
-        if ! sudo rm -rf "{{ .qemu_workspace }}"; then {{ .error }} "failed to delete workspace directory"; fi
-        {{ .log }} "success" "workspace directory deleted"
+        {{ .log }} "title" "delete VM files"
+        {{ .log }} "info" "sudo rm -f \"{{ .qemu_workspace }}/qemu.qcow2\""
+        if ! sudo rm -f "{{ .qemu_workspace }}"/qemu.qcow2; then {{ .error }} "failed to delete disk file"; fi
+        {{ .log }} "info" "sudo rm -f \"{{ .qemu_workspace }}/qemu.qcow2\""
+        if ! sudo rm -f "{{ .qemu_workspace }}"/qemu.pid; then {{ .error }} "failed to delete pid file"; fi
+        {{ .log }} "info" "sudo rm -f \"{{ .qemu_workspace }}/qemu.log\""
+        if ! sudo rm -f "{{ .qemu_workspace }}"/qemu.log; then {{ .error }} "failed to delete log file"; fi
+        {{ .log }} "success" "virtual machine files deleted"
 
   delete-uuid:
     internal: true

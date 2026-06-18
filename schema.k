@@ -49,7 +49,7 @@ schema Qemu:
             *([
                 "-drive if=pflash,format=raw,readonly=on,file=${_edk2_path}"
             ] if os.arch == "aarch64" and _edk2_path else [])
-            "-drive if=virtio,format=qcow2,file=${workspace}/${os.name}-${os.edition}-${os.version}-${os.arch}.qcow2,cache=unsafe"
+            "-drive if=virtio,format=qcow2,file=${workspace}/qemu.qcow2,cache=unsafe"
             "-fw_cfg name=opt/com.coreos/config,file=${_taskfile_dir}/config.ign"
             "-netdev vmnet-shared,id=net0" if host_os == "darwin" else "-netdev user,id=net0"
             "-device virtio-net-pci,netdev=net0"
@@ -87,7 +87,7 @@ schema Memory:
     unit: str = "M"
 
 schema Disk:
-    size: int = 32
+    size: int = 16
     unit: str = "G"
 
 schema Command:
