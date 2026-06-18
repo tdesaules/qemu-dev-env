@@ -278,3 +278,28 @@ WantedBy=multi-user.target
 """
 }
 
+etc_containers_systemd_beszel_agent_container = lambda key: str, token: str = "", hub_url: str = "" -> str {
+    _token_part = "Environment=\"TOKEN=${token}\"\n" if token else ""
+    _hub_url_part = "Environment=\"HUB_URL=${hub_url}\"\n" if hub_url else ""
+    """\
+[Unit]
+Description=Beszel Agent Container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=beszel-agent
+Image=docker.io/henrygd/beszel-agent:latest
+Network=host
+PodmanArgs=--pid=host
+Volume=/run/podman/podman.sock:/var/run/docker.sock:ro
+Volume=/var/lib/beszel-agent:/var/lib/beszel-agent
+Environment="KEY=${key}"
+${_token_part}${_hub_url_part}
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+"""
+}

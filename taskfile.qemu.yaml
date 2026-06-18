@@ -35,7 +35,10 @@ vars:
   qemu_hardware_disk_size: "{{ ( .kcl_dataset | fromJson ).config.hardware.disk.size }}"
   qemu_command_binary: "{{ ( .kcl_dataset | fromJson ).config.command.binary }}"
   qemu_command_options: '{{ ( .kcl_dataset | fromJson ).config.command.options | join " " }}'
-  qemu_github_token: '{{ ( .kcl_dataset | fromJson ).config.butane.github_token | default (env "GITHUB_TOKEN") }}'
+  qemu_github_token: '{{ ( .kcl_dataset | fromJson ).config.butane.github.token | default (env "GITHUB_TOKEN") }}'
+  qemu_beszel_username: '{{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}{{ ( .kcl_dataset | fromJson ).config.butane.beszel.username }}{{ else }}local@home.lan{{ end }}'
+  qemu_beszel_password: '{{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}{{ ( .kcl_dataset | fromJson ).config.butane.beszel.password }}{{ else }}local@home.lan{{ end }}'
+  qemu_beszel_local_url: 'http://localhost:{{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}{{ if ( .kcl_dataset | fromJson ).config.butane.beszel.url }}{{ ( .kcl_dataset | fromJson ).config.butane.beszel.url | splitList ":" | last }}{{ else }}8090{{ end }}{{ else }}8090{{ end }}'
 
 tasks:
   check:
@@ -73,6 +76,7 @@ tasks:
       - task: stop-vm
         vars:
           force: "true"
+      - task: delete-beszel-system
       - task: delete-vm
       - task: delete-ignition
       - task: delete-butane
@@ -338,6 +342,30 @@ tasks:
         {{ .log }} "info" "sudo rm -f \"{{ .qemu_workspace }}/qemu.log\""
         if ! sudo rm -f "{{ .qemu_workspace }}"/qemu.log; then {{ .error }} "failed to delete log file"; fi
         {{ .log }} "success" "virtual machine files deleted"
+
+  delete-beszel-system:
+    internal: true
+    silent: true
+    status:
+      - '! curl -s --max-time 2 "{{ .qemu_beszel_local_url }}/api/health" | jq -e ".code == 200" >/dev/null 2>&1'
+    cmds:
+      - |
+        {{ .log }} "title" "clean up beszel system entries"
+        TOKEN_JSON=$(curl -s --max-time 5 -X POST "{{ .qemu_beszel_local_url }}/api/collections/users/auth-with-password" \
+          -H "Content-Type: application/json" \
+          -d "{\"identity\": \"{{ .qemu_beszel_username }}\", \"password\": \"{{ .qemu_beszel_password }}\"}" 2>/dev/null || true)
+        AUTH_TOKEN=$(echo "$TOKEN_JSON" | jq -r '.token // empty' 2> /dev/null || true)
+        if [ -z "$AUTH_TOKEN" ]; then
+          {{ .log }} "warning" "failed to authenticate with beszel hub... skipping deletion."
+          exit 0
+        fi
+        SYSTEMS_JSON=$(curl -s --max-time 5 -X GET "{{ .qemu_beszel_local_url }}/api/collections/systems/records" -H "Authorization: $AUTH_TOKEN" 2>/dev/null || true)
+        SYSTEM_IDS=$(echo "$SYSTEMS_JSON" | jq -r --arg name "{{ .qemu_uuid }}.local" '.items[] | select(.name == $name) | .id' 2>/dev/null || true)
+        for sid in $SYSTEM_IDS; do
+          {{ .log }} "info" "curl -s --max-time 5 -X DELETE \"{{ .qemu_beszel_local_url }}/api/collections/systems/records/$sid\" -H \"Authorization: $AUTH_TOKEN\" >/dev/null 2>&1 || true"
+          curl -s --max-time 5 -X DELETE "{{ .qemu_beszel_local_url }}/api/collections/systems/records/$sid" -H "Authorization: $AUTH_TOKEN" >/dev/null 2>&1 || true
+        done
+        {{ .log }} "success" "beszel system entries cleaned up successfully."
 
   delete-uuid:
     internal: true

@@ -106,9 +106,11 @@ schema Butane:
         "cockpit-ws"
         "cockpit-system"
         "cockpit-ostree"
+        "cockpit-podman"
     ]
     custom_pkgs: [str] = []
-    github_token: str = ""
+    github: Github = Github {}
+    beszel?: Beszel
     default_mise_tools: {str:str} = {
         "github:starship/starship" = "latest"
         "github:fastfetch-cli/fastfetch" = "latest"
@@ -138,7 +140,14 @@ schema Butane:
             user = {}
             group = {}
         }
-    ]
+    ] + ([
+        {
+            path = "/var/lib/beszel-agent"
+            mode = 493
+            user = { name = "root" }
+            group = { name = "root" }
+        }
+    ] if beszel else [])
     files = [
         {
             path = "/etc/zincati/config.d/50-disable-updates.toml"
@@ -189,7 +198,7 @@ schema Butane:
             mode = 420
             user = {}
             group = {}
-            contents.inline = templates.var_home_user_bashrc_d_00_mise_sh(user.name, github_token)
+            contents.inline = templates.var_home_user_bashrc_d_00_mise_sh(user.name, github.token)
         }
         {
             path = "/var/home/${user.name}/.bashrc.d/10-starship.sh"
@@ -237,7 +246,13 @@ schema Butane:
             mode = 420
             contents.inline = templates.etc_selinux_config()
         }
-    ]
+    ] + ([
+        {
+            path = "/etc/containers/systemd/beszel-agent.container"
+            mode = 420
+            contents.inline = templates.etc_containers_systemd_beszel_agent_container(beszel.key, beszel.token or "", beszel.url or "")
+        }
+    ] if beszel and beszel.key else [])
     units = [
         {
             name = "install-system-pkgs.service"
@@ -247,7 +262,7 @@ schema Butane:
         {
             name = "run-topgrade.service"
             enabled = True
-            contents = templates.run_topgrade_service(user.name, github_token)
+            contents = templates.run_topgrade_service(user.name, github.token)
         }
         {
             name = "var-home-${user.name}-.qemu.mount"
@@ -273,6 +288,10 @@ schema Butane:
             name = "configure-cockpit.service"
             enabled = True
             contents = templates.configure_cockpit_service()
+        }
+        {
+            name = "podman.socket"
+            enabled = True
         }
     ] + ([
         {
@@ -320,3 +339,13 @@ schema ButaneUnit:
     name: str
     enabled: bool = True
     contents?: str
+
+schema Beszel:
+    key: str
+    token?: str
+    url?: str
+    username: str = "local@home.lan"
+    password: str = "local@home.lan"
+
+schema Github:
+    token: str = ""
