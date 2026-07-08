@@ -51,7 +51,7 @@ install_system_pkgs_service = lambda default_pkgs: [str], custom_pkgs: [str] -> 
     """\
 [Unit]
 Description=Provisioning System Packages
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 After=network-online.target
 Wants=network-online.target
 
@@ -81,7 +81,7 @@ run_topgrade_service = lambda username: str, github_token: str -> str {
     """\
 [Unit]
 Description=Topgrade System and User Tools Update
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 After=install-system-pkgs.service
 Wants=install-system-pkgs.service
 
@@ -102,7 +102,7 @@ var_home_user_qemu_mount = lambda username: str -> str {
     """\
 [Unit]
 Description=Mount QEMU project workspace
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 Before=extract-kernel.service
 
 [Mount]
@@ -120,7 +120,7 @@ var_home_user_qemu_automount = lambda username: str -> str {
     """\
 [Unit]
 Description=Automount QEMU project workspace
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 
 [Automount]
 Where=/var/home/${username}/.qemu
@@ -134,7 +134,7 @@ var_home_user_workspace_mount = lambda username: str -> str {
     """\
 [Unit]
 Description=Mount Host Shared Directory in Home
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 
 [Mount]
 What=workspace
@@ -148,7 +148,7 @@ var_home_user_workspace_automount = lambda username: str -> str {
     """\
 [Unit]
 Description=Automount Workspace Shared Directory in Home
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 
 [Automount]
 Where=/var/home/${username}/workspace
@@ -162,7 +162,7 @@ var_home_user_config_starship_mount = lambda username: str -> str {
     """\
 [Unit]
 Description=Mount Starship Config
-ConditionVirtualization=qemu
+ConditionVirtualization=vm
 
 [Mount]
 What=starship
@@ -208,7 +208,7 @@ fi\
 var_home_user_bashrc_d_10_starship_sh = lambda username: str -> str {
     """\
 if [[ $- == *i* ]] && [ "$USER" = "${username}" ]; then
-    export STARSHIP_CONFIG="/var/home/${username}/.config/starship/starship.toml"
+    export STARSHIP_CONFIG="/var/home/${username}/.config/starship/config.toml"
     if command -v starship >/dev/null 2>&1; then
         eval "$(starship init bash)"
     fi
@@ -278,9 +278,11 @@ WantedBy=multi-user.target
 """
 }
 
-etc_containers_systemd_beszel_agent_container = lambda key: str, token: str = "", hub_url: str = "" -> str {
+etc_containers_systemd_beszel_agent_container = lambda key: str = "", token: str = "", hub_url: str = "", system_name: str = "" -> str {
+    _key_part = "Environment=\"KEY=${key}\"\n" if key else ""
     _token_part = "Environment=\"TOKEN=${token}\"\n" if token else ""
     _hub_url_part = "Environment=\"HUB_URL=${hub_url}\"\n" if hub_url else ""
+    _system_name_part = "Environment=\"SYSTEM_NAME=${system_name}\"\n" if system_name else ""
     """\
 [Unit]
 Description=Beszel Agent Container
@@ -294,9 +296,8 @@ Network=host
 PodmanArgs=--pid=host
 Volume=/run/podman/podman.sock:/var/run/docker.sock:ro
 Volume=/var/lib/beszel-agent:/var/lib/beszel-agent
-Environment="KEY=${key}"
-${_token_part}${_hub_url_part}
-[Service]
+Environment="DISABLE_SSH=true"
+${_key_part}${_token_part}${_hub_url_part}${_system_name_part}[Service]
 Restart=always
 
 [Install]

@@ -10,14 +10,20 @@ _uuid = file.read("${_taskfile_dir}/.uuid").strip() if file.exists("${_taskfile_
 _workspace = "${file.read_env('HOME')}/.qemu/${_uuid}"
 _host_os = option("qemu_host_os") or "null"
 _os_arch = option("qemu_host_arch") or "null"
+_aio_opt = ",aio=io_uring" if _host_os == "linux" else ""
 _os_name: str = "fedora"
 _os_edition: str = "coreos"
-_os_version: str = "44.20260523.3.1"
+_os_version: str = "44.20260607.3.1"
 _os_streams: str = "stable"
-_checksum_x86_64 = "b62d2628784723c342be8761e6d02900413f94670e7d41cf498d4c35c8befeb7"
-_checksum_aarch64 = "8afa8aafd8c53a12cdf9fb31d126abb7f4269fed780cac7f30f088b3afc19c9b"
+_checksum_x86_64 = "6eb083986174ec4b0e588314b9c94947a55a01a8a2d33e2fd865e4ddc6e81e38"
+_checksum_aarch64 = "c44f7e7ccba0dbcbb2d1826d35268555d2fa468ca9002c89ca3461caf27a320d"
 
-_edk2_path = option("qemu_edk2_path") or ("/opt/homebrew/share/qemu/edk2-aarch64-code.fd" if _host_os == "darwin" else "/usr/share/qemu/edk2-aarch64-code.fd")
+_edk2_candidates = [
+    "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
+    "/usr/share/qemu/edk2-aarch64-code.fd"
+    "/usr/share/AAVMF/AAVMF_CODE.fd"
+]
+_edk2_path = option("qemu_edk2_path") or ([p for p in _edk2_candidates if file.exists(p)][0] if [p for p in _edk2_candidates if file.exists(p)] else "")
 _starship_config_dir = "${file.read_env('HOME')}/.config/starship"
 _has_starship = file.exists(_starship_config_dir)
 _ssh_key_paths = [
@@ -36,7 +42,7 @@ schema Qemu:
     command: Command = Command {
         options = [
             "-name ${uuid}"
-            "-M ${'q35' if os.arch == 'x86_64' else 'virt,highmem=off'}"
+            "-M ${'q35,vmport=off' if os.arch == 'x86_64' else 'virt,highmem=off'}"
             "-accel ${'hvf' if host_os == 'darwin' else 'kvm'}"
             "-cpu host"
             "-smp ${hardware.cpu}"
@@ -49,9 +55,9 @@ schema Qemu:
             *([
                 "-drive if=pflash,format=raw,readonly=on,file=${_edk2_path}"
             ] if os.arch == "aarch64" and _edk2_path else [])
-            "-drive if=virtio,format=qcow2,file=${workspace}/qemu.qcow2,cache=unsafe"
+            "-drive if=virtio,format=qcow2,file=${workspace}/qemu.qcow2,cache=unsafe${_aio_opt}"
             "-fw_cfg name=opt/com.coreos/config,file=${_taskfile_dir}/config.ign"
-            "-netdev vmnet-shared,id=net0" if host_os == "darwin" else "-netdev user,id=net0"
+            "-netdev vmnet-shared,id=net0" if host_os == "darwin" else "-netdev bridge,id=net0,br=br-qemu"
             "-device virtio-net-pci,netdev=net0"
             "-fsdev local,id=fsdev0,path=${workspace},security_model=passthrough"
             "-device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu"
@@ -250,9 +256,9 @@ schema Butane:
         {
             path = "/etc/containers/systemd/beszel-agent.container"
             mode = 420
-            contents.inline = templates.etc_containers_systemd_beszel_agent_container(beszel.key, beszel.token or "", beszel.url or "")
+            contents.inline = templates.etc_containers_systemd_beszel_agent_container(beszel.key or "", beszel.token or "", beszel.url or "", hostname)
         }
-    ] if beszel and beszel.key else [])
+    ] if beszel and beszel.token else [])
     units = [
         {
             name = "install-system-pkgs.service"
@@ -341,8 +347,8 @@ schema ButaneUnit:
     contents?: str
 
 schema Beszel:
-    key: str
-    token?: str
+    key: str = option("beszel_key") or ""
+    token: str = option("beszel_token") or ""
     url?: str
     username: str = "local@home.lan"
     password: str = "local@home.lan"

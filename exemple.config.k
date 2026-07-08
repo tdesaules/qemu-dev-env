@@ -6,14 +6,14 @@ config = schema.Qemu {
             "htop"
         ]
         github = {
-            token = "ghp_5xuyaKne6Af..."
+            token = option("github_token")
         }
         custom_mise_tools = {
             "go" = "latest"
         }
         files += [
             {
-                path = "/var/home/" + _usr + "/hello-files"
+                path = "/var/home/${option('qemu_butane_user_name')}/hello-files"
                 mode = 420
                 contents.inline = "hello files\n"
             }
@@ -43,7 +43,7 @@ After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/bash -c "echo 'hello units' > /var/home/${_usr}/hello-units && chown ${_usr}:${_usr} /var/home/${_usr}/hello-units && chmod 644 /var/home/${_usr}/hello-units"
+ExecStart=/usr/bin/bash -c "echo 'hello units' > /var/home/${option('qemu_butane_user_name')}/hello-units && chown ${option('qemu_butane_user_name')}:${option('qemu_butane_user_name')} /var/home/${option('qemu_butane_user_name')}/hello-units && chmod 644 /var/home/${option('qemu_butane_user_name')}/hello-units"
 
 [Install]
 WantedBy=multi-user.target

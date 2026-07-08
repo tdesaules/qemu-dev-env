@@ -10,6 +10,10 @@ butane = {
     version = "1.5.0"
     passwd.users = [
         {
+            name = "core"
+            uid = 2000
+        }
+        {
             name = qemu.butane.user.name
             uid = qemu.butane.user.uid
             groups = ["wheel", "docker"]

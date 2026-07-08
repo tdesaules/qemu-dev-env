@@ -11,6 +11,8 @@ vars:
     sh: "whoami"
   qemu_butane_user_id:
     sh: "id -u"
+  shasum_cmd:
+    sh: 'command -v shasum || command -v sha256sum'
   kcl_dataset:
     sh: |
       kcl {{ .TASKFILE_DIR }}/config.k --format json \
@@ -20,7 +22,6 @@ vars:
         --argument qemu_host_arch='{{ .qemu_host_arch }}' \
         --argument qemu_host_os='{{ .qemu_host_os }}' \
         --argument github_token='{{ env "GITHUB_TOKEN" }}'
-    cache: true
   qemu_uuid: "{{ ( .kcl_dataset | fromJson ).config.uuid }}"
   qemu_workspace: "{{ ( .kcl_dataset | fromJson ).config.workspace }}"
   qemu_os_name: "{{ ( .kcl_dataset | fromJson ).config.os.name }}"
@@ -36,9 +37,31 @@ vars:
   qemu_command_binary: "{{ ( .kcl_dataset | fromJson ).config.command.binary }}"
   qemu_command_options: '{{ ( .kcl_dataset | fromJson ).config.command.options | join " " }}'
   qemu_github_token: '{{ ( .kcl_dataset | fromJson ).config.butane.github.token | default (env "GITHUB_TOKEN") }}'
-  qemu_beszel_username: '{{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}{{ ( .kcl_dataset | fromJson ).config.butane.beszel.username }}{{ else }}local@home.lan{{ end }}'
-  qemu_beszel_password: '{{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}{{ ( .kcl_dataset | fromJson ).config.butane.beszel.password }}{{ else }}local@home.lan{{ end }}'
+  qemu_beszel_username:
+    sh: 'echo "${BESZEL_USER:-$(mise env --json 2>/dev/null | jq -r ".BESZEL_USER // empty" 2>/dev/null || gopass show -o beszel/username 2>/dev/null || echo local@home.lan)}"'
+  qemu_beszel_password:
+    sh: 'echo "${BESZEL_PASSWORD:-$(mise env --json 2>/dev/null | jq -r ".BESZEL_PASSWORD // empty" 2>/dev/null || gopass show -o beszel/password 2>/dev/null || echo local@home.lan)}"'
+  qemu_beszel_key:
+    sh: 'echo "${BESZEL_KEY:-$(mise env --json 2>/dev/null | jq -r ".BESZEL_KEY // empty" 2>/dev/null || gopass show -o beszel/key 2>/dev/null || echo "")}"'
   qemu_beszel_local_url: 'http://localhost:{{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}{{ if ( .kcl_dataset | fromJson ).config.butane.beszel.url }}{{ ( .kcl_dataset | fromJson ).config.butane.beszel.url | splitList ":" | last }}{{ else }}8090{{ end }}{{ else }}8090{{ end }}'
+  qemu_beszel_token:
+    sh: |
+      {{ if (index ( .kcl_dataset | fromJson ).config.butane "beszel") }}
+      BESZEL_URL="{{ .qemu_beszel_local_url }}"
+      BESZEL_USER="{{ .qemu_beszel_username }}"
+      BESZEL_PASS="{{ .qemu_beszel_password }}"
+      TOKEN_JSON=$(curl -s --max-time 5 -X POST "$BESZEL_URL/api/collections/_superusers/auth-with-password" -H "Content-Type: application/json" -d "{\"identity\": \"$BESZEL_USER\", \"password\": \"$BESZEL_PASS\"}" 2>/dev/null || true)
+      AUTH_TOKEN=$(echo "$TOKEN_JSON" | jq -r '.token // empty' 2>/dev/null)
+      if [ -z "$AUTH_TOKEN" ]; then exit 0; fi
+      EXISTING=$(curl -s --max-time 5 "$BESZEL_URL/api/collections/universal_tokens/records" -H "Authorization: $AUTH_TOKEN" 2>/dev/null | jq -r '.items[0].token // empty' 2>/dev/null)
+      if [ -n "$EXISTING" ]; then
+        echo "$EXISTING"
+      else
+        NEW_TOKEN=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "beszel-$(date +%s)")
+        USER_ID=$(curl -s --max-time 5 "$BESZEL_URL/api/collections/users/records" -H "Authorization: $AUTH_TOKEN" 2>/dev/null | jq -r '.items[0].id // empty' 2>/dev/null)
+        curl -s --max-time 5 -X POST "$BESZEL_URL/api/collections/universal_tokens/records" -H "Authorization: $AUTH_TOKEN" -H "Content-Type: application/json" -d "{\"token\": \"$NEW_TOKEN\", \"user\": \"$USER_ID\"}" 2>/dev/null | jq -r '.token // empty' 2>/dev/null
+      fi
+      {{ end }}
 
 tasks:
   check:
@@ -54,6 +77,8 @@ tasks:
 
   up:
     desc: "QEMU : Wake up the virtual machine"
+    deps:
+      - task: check
     cmds:
       - task: generate-uuid
       - task: create-workspace
@@ -63,6 +88,7 @@ tasks:
       - task: resize-image
       - task: build-butane
       - task: build-ignition
+      - task: create-bridge
       - task: launch-vm
       - task: wait-ssh
       - task: wait-rpm-install
@@ -76,6 +102,7 @@ tasks:
       - task: stop-vm
         vars:
           force: "true"
+      - task: delete-bridge
       - task: delete-beszel-system
       - task: delete-vm
       - task: delete-ignition
@@ -137,9 +164,9 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "check shasum binary"
-        {{ .log }} "info" "command -v shasum"
-        if ! command -v shasum > /dev/null 2>&1 ; then {{ .error }} "can't find \"shasum\" binary" ; fi
-        {{ .log }} "success" "\"shasum\" binary available"
+        {{ .log }} "info" "command -v shasum || command -v sha256sum"
+        if ! command -v {{ .shasum_cmd }} > /dev/null 2>&1 ; then {{ .error }} "can't find \"shasum\" or \"sha256sum\" binary" ; fi
+        {{ .log }} "success" "\"{{ .shasum_cmd }}\" binary available"
 
   check-jq:
     internal: true
@@ -201,15 +228,15 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "create workspace"
-        {{ .log }} "info" "mkdir \"{{ .qemu_workspace }}\""
-        if ! mkdir "{{ .qemu_workspace }}" ; then {{ .error }} "directory \"{{ .qemu_workspace }}\" has not been created"; fi
+        {{ .log }} "info" "mkdir -p \"{{ .qemu_workspace }}\""
+        if ! mkdir -p "{{ .qemu_workspace }}" ; then {{ .error }} "directory \"{{ .qemu_workspace }}\" has not been created"; fi
         {{ .log }} "success" "workspace directory created"
 
   pull-image:
     internal: true
     silent: true
     status:
-      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | shasum --check --algorithm 256
+      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | {{ .shasum_cmd }} --check
     cmds:
       - |
         {{ .log }} "title" "pull qemu image"
@@ -233,7 +260,7 @@ tasks:
       - test -f "{{ .qemu_workspace }}/fedora.gpg"
       - test -f "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig"
       - gpgv --keyring "{{ .qemu_workspace }}/fedora.gpg" "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz.sig" "{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
-      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | shasum --check --algorithm 256
+      - echo "{{ .qemu_checksum }}  {{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz" | {{ .shasum_cmd }} --check
     cmds:
       - |
         {{ .log }} "title" "check qemu image"
@@ -250,8 +277,8 @@ tasks:
         QCOW2="{{ .qemu_workspace }}/{{ .qemu_os_name }}-{{ .qemu_os_edition }}-{{ .qemu_os_version }}-{{ .qemu_host_arch }}.qcow2.xz"
         {{ .log }} "info" "gpgv --keyring \"$KEYRING\" \"$SIG\" \"$QCOW2\""
         if ! gpgv --keyring "$KEYRING" "$SIG" "$QCOW2" > /dev/null 2>&1; then {{ .error }} "gpg signature verification failed"; fi
-        {{ .log }} "info" "echo "{{ .qemu_checksum }}  $QCOW2" | shasum --check --algorithm 256"
-        if ! echo "{{ .qemu_checksum }}  $QCOW2" | shasum --check --algorithm 256 > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
+        {{ .log }} "info" "echo "{{ .qemu_checksum }}  $QCOW2" | {{ .shasum_cmd }} --check"
+        if ! echo "{{ .qemu_checksum }}  $QCOW2" | {{ .shasum_cmd }} --check > /dev/null 2>&1; then {{ .error }} "checksum verification failed"; fi
         {{ .log }} "success" "image is valid"
 
   extract-image:
@@ -307,8 +334,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "build butane"
-        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --path_selector butane"
-        if ! kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
+        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --argument beszel_token='{{ .qemu_beszel_token }}' --argument beszel_key='{{ .qemu_beszel_key }}' --path_selector butane"
+        if ! kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --argument beszel_token='{{ .qemu_beszel_token }}' --argument beszel_key='{{ .qemu_beszel_key }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
         {{ .log }} "success" "butane configuration generated"
 
   build-ignition:
@@ -351,7 +378,7 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "clean up beszel system entries"
-        TOKEN_JSON=$(curl -s --max-time 5 -X POST "{{ .qemu_beszel_local_url }}/api/collections/users/auth-with-password" \
+        TOKEN_JSON=$(curl -s --max-time 5 -X POST "{{ .qemu_beszel_local_url }}/api/collections/_superusers/auth-with-password" \
           -H "Content-Type: application/json" \
           -d "{\"identity\": \"{{ .qemu_beszel_username }}\", \"password\": \"{{ .qemu_beszel_password }}\"}" 2>/dev/null || true)
         AUTH_TOKEN=$(echo "$TOKEN_JSON" | jq -r '.token // empty' 2> /dev/null || true)
@@ -414,6 +441,30 @@ tasks:
         {{ .log }} "info" "rm -f {{ .qemu_workspace }}/qemu.pid"
         if ! sudo rm -f "{{ .qemu_workspace }}/qemu.pid"; then {{ .error }} "failed to delete \"{{ .qemu_workspace }}/qemu.pid\" file"; fi
         {{ .log }} "success" "stale pid file deleted"
+
+  create-bridge:
+    internal: true
+    silent: true
+    status:
+      - '[ "{{ .qemu_host_os }}" != "linux" ] || nmcli -t -f GENERAL.STATE connection show br-qemu 2>/dev/null | grep -q activated'
+    cmds:
+      - |
+        {{ .log }} "title" "activate bridge network"
+        {{ .log }} "info" "sudo nmcli connection up br-qemu"
+        if ! sudo nmcli connection up br-qemu > /dev/null 2>&1; then {{ .error }} "failed to activate br-qemu bridge"; fi
+        {{ .log }} "success" "br-qemu bridge activated"
+
+  delete-bridge:
+    internal: true
+    silent: true
+    status:
+      - '[ "{{ .qemu_host_os }}" != "linux" ] || ! nmcli -t -f GENERAL.STATE connection show br-qemu 2>/dev/null | grep -q activated'
+    cmds:
+      - |
+        {{ .log }} "title" "deactivate bridge network"
+        {{ .log }} "info" "sudo nmcli connection down br-qemu"
+        sudo nmcli connection down br-qemu > /dev/null 2>&1 || true
+        {{ .log }} "success" "br-qemu bridge deactivated"
 
   launch-vm:
     internal: true
