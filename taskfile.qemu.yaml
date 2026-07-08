@@ -387,7 +387,7 @@ tasks:
           exit 0
         fi
         SYSTEMS_JSON=$(curl -s --max-time 5 -X GET "{{ .qemu_beszel_local_url }}/api/collections/systems/records" -H "Authorization: $AUTH_TOKEN" 2>/dev/null || true)
-        SYSTEM_IDS=$(echo "$SYSTEMS_JSON" | jq -r --arg name "{{ .qemu_uuid }}.local" '.items[] | select(.name == $name) | .id' 2>/dev/null || true)
+        SYSTEM_IDS=$(echo "$SYSTEMS_JSON" | jq -r --arg name "{{ .qemu_uuid }}" '.items[] | select(.name == $name) | .id' 2>/dev/null || true)
         for sid in $SYSTEM_IDS; do
           {{ .log }} "info" "curl -s --max-time 5 -X DELETE \"{{ .qemu_beszel_local_url }}/api/collections/systems/records/$sid\" -H \"Authorization: $AUTH_TOKEN\" >/dev/null 2>&1 || true"
           curl -s --max-time 5 -X DELETE "{{ .qemu_beszel_local_url }}/api/collections/systems/records/$sid" -H "Authorization: $AUTH_TOKEN" >/dev/null 2>&1 || true
