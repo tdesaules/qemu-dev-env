@@ -77,6 +77,8 @@ tasks:
 
   up:
     desc: "QEMU : Wake up the virtual machine"
+    vars:
+      attach: '{{ default "true" .attach }}'
     deps:
       - task: check
     cmds:
@@ -95,6 +97,8 @@ tasks:
       - task: wait-topgrade
       - task: reboot
       - task: connect-ssh
+        vars:
+          attach: '{{ .attach }}'
 
   down:
     desc: "QEMU : Destroy the virtual machine"
@@ -614,8 +618,12 @@ tasks:
   connect-ssh:
     internal: true
     silent: true
+    vars:
+      attach: '{{ default "true" .attach }}'
     status:
-      - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
+      - |
+        if [ "{{ .attach }}" = "false" ]; then exit 0; fi
+        task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
     cmds:
       - |
         {{ .log }} "title" "connect virtual machine using ssh"
