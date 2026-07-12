@@ -153,7 +153,15 @@ schema Butane:
             mode = 493
         }
         {
+            path = "/var/home/${user.name}/.local"
+            mode = 493
+        }
+        {
             path = "/var/home/${user.name}/.local/share"
+            mode = 493
+        }
+        {
+            path = "/var/home/${user.name}/.local/state"
             mode = 493
         }
         {
