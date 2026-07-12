@@ -26,6 +26,10 @@ _edk2_candidates = [
 _edk2_path = option("qemu_edk2_path") or ([p for p in _edk2_candidates if file.exists(p)][0] if [p for p in _edk2_candidates if file.exists(p)] else "")
 _starship_config_dir = "${file.read_env('HOME')}/.config/starship"
 _has_starship = file.exists(_starship_config_dir)
+_opencode_config_dir = "${file.read_env('HOME')}/.config/opencode"
+_opencode_data_dir = "${file.read_env('HOME')}/.local/share/opencode"
+_has_opencode_config = file.exists(_opencode_config_dir)
+_has_opencode_data = file.exists(_opencode_data_dir)
 _ssh_key_paths = [
     "${file.read_env('HOME')}/.ssh/id_ed25519.pub"
     "${file.read_env('HOME')}/.ssh/id_rsa.pub"
@@ -67,6 +71,14 @@ schema Qemu:
                 "-fsdev local,id=fsdev2,path=${_starship_config_dir},security_model=passthrough,readonly=on"
                 "-device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship"
             ] if _has_starship else [])
+            *([
+                "-fsdev local,id=fsdev3,path=${_opencode_config_dir},security_model=passthrough"
+                "-device virtio-9p-pci,fsdev=fsdev3,mount_tag=opencode-config"
+            ] if _has_opencode_config else [])
+            *([
+                "-fsdev local,id=fsdev4,path=${_opencode_data_dir},security_model=passthrough"
+                "-device virtio-9p-pci,fsdev=fsdev4,mount_tag=opencode-data"
+            ] if _has_opencode_data else [])
             "-serial file:${workspace}/qemu.log"
         ]
     }
@@ -138,6 +150,18 @@ schema Butane:
         }
         {
             path = "/var/home/${user.name}/.config/mise"
+            mode = 493
+        }
+        {
+            path = "/var/home/${user.name}/.local/share"
+            mode = 493
+        }
+        {
+            path = "/var/home/${user.name}/.config/opencode"
+            mode = 493
+        }
+        {
+            path = "/var/home/${user.name}/.local/share/opencode"
             mode = 493
         }
         {
@@ -305,7 +329,29 @@ schema Butane:
             enabled = True
             contents = templates.var_home_user_config_starship_mount(user.name)
         }
-    ] if _has_starship else [])
+    ] if _has_starship else []) + ([
+        {
+            name = "var-home-${user.name}-.config-opencode.mount"
+            enabled = True
+            contents = templates.var_home_user_config_opencode_mount(user.name)
+        }
+        {
+            name = "var-home-${user.name}-.config-opencode.automount"
+            enabled = True
+            contents = templates.var_home_user_config_opencode_automount(user.name)
+        }
+    ] if _has_opencode_config else []) + ([
+        {
+            name = "var-home-${user.name}-.local-share-opencode.mount"
+            enabled = True
+            contents = templates.var_home_user_local_share_opencode_mount(user.name)
+        }
+        {
+            name = "var-home-${user.name}-.local-share-opencode.automount"
+            enabled = True
+            contents = templates.var_home_user_local_share_opencode_automount(user.name)
+        }
+    ] if _has_opencode_data else [])
 
 schema ButaneUser:
     name: str = "${_username}"

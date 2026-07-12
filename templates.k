@@ -109,7 +109,7 @@ Before=extract-kernel.service
 What=qemu
 Where=/var/home/${username}/.qemu
 Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=loose
+Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=mmap
 
 [Install]
 WantedBy=multi-user.target
@@ -140,7 +140,7 @@ ConditionVirtualization=vm
 What=workspace
 Where=/var/home/${username}/workspace
 Type=9p
-Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=loose
+Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=mmap
 """
 }
 
@@ -168,7 +168,69 @@ ConditionVirtualization=vm
 What=starship
 Where=/var/home/${username}/.config/starship
 Type=9p
-Options=trans=virtio,version=9p2000.L,ro,msize=512000,cache=loose
+Options=trans=virtio,version=9p2000.L,ro,msize=512000,cache=mmap
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
+var_home_user_config_opencode_mount = lambda username: str -> str {
+    """\
+[Unit]
+Description=Mount OpenCode Config
+ConditionVirtualization=vm
+
+[Mount]
+What=opencode-config
+Where=/var/home/${username}/.config/opencode
+Type=9p
+Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=mmap
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
+var_home_user_config_opencode_automount = lambda username: str -> str {
+    """\
+[Unit]
+Description=Automount OpenCode Config
+ConditionVirtualization=vm
+
+[Automount]
+Where=/var/home/${username}/.config/opencode
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
+var_home_user_local_share_opencode_mount = lambda username: str -> str {
+    """\
+[Unit]
+Description=Mount OpenCode Data
+ConditionVirtualization=vm
+
+[Mount]
+What=opencode-data
+Where=/var/home/${username}/.local/share/opencode
+Type=9p
+Options=trans=virtio,version=9p2000.L,rw,msize=512000,cache=mmap
+
+[Install]
+WantedBy=multi-user.target
+"""
+}
+
+var_home_user_local_share_opencode_automount = lambda username: str -> str {
+    """\
+[Unit]
+Description=Automount OpenCode Data
+ConditionVirtualization=vm
+
+[Automount]
+Where=/var/home/${username}/.local/share/opencode
 
 [Install]
 WantedBy=multi-user.target
