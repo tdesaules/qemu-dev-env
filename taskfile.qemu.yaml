@@ -15,7 +15,9 @@ vars:
     sh: 'command -v shasum || command -v sha256sum'
   kcl_dataset:
     sh: |
-      kcl {{ .TASKFILE_DIR }}/config.k --format json \
+      CONFIG_PATH="{{ .TASKFILE_DIR }}/config.k"
+      if [ ! -f "$CONFIG_PATH" ]; then echo '{"config":{"butane":{},"checksum":{},"command":{"options":[]},"hardware":{"memory":{},"disk":{}},"os":{}}}'; exit 0; fi
+      kcl "$CONFIG_PATH" --format json \
         --argument taskfile_dir='{{ .TASKFILE_DIR }}' \
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
         --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
