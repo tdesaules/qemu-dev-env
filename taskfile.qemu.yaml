@@ -691,9 +691,11 @@ tasks:
       - task -t {{ .TASKFILE_DIR }}/taskfile.qemu.yaml status | jq -e '.status != "running"' > /dev/null
     cmds:
       - |
-        {{ .log }} "title" "opening Cockpit web console: https://{{ .qemu_uuid }}.local:9090"
+        URL="https://{{ .qemu_uuid }}.local:9090"
+        {{ .log }} "title" "opening Cockpit web console: ${URL}"
         if [ "{{ .qemu_host_os }}" = "darwin" ]; then
-          open "https://{{ .qemu_uuid }}.local:9090"
-        else
-          xdg-open "https://{{ .qemu_uuid }}.local:9090" 2>/dev/null || {{ .log }} "warning" "could not open browser. Please navigate to https://{{ .qemu_uuid }}.local:9090"
+          open "$URL" 2>/dev/null || true
+        elif [ -n "$DISPLAY" ] && command -v xdg-open >/dev/null 2>&1; then
+          xdg-open "$URL" 2>/dev/null || true
         fi
+        {{ .log }} "info" "if the browser did not open, navigate to: ${URL}"

@@ -1,6 +1,15 @@
 import .schema as schema
 
 config = schema.Qemu {
+    hardware = schema.Hardware {
+        cpu = 2
+        memory = schema.Memory {
+            size = 4096
+        }
+        disk = schema.Disk {
+            size = 30
+        }
+    }
     butane = schema.Butane {
         custom_pkgs = [
             "htop"
@@ -11,7 +20,7 @@ config = schema.Qemu {
         custom_mise_tools = {
             "go" = "latest"
         }
-        files += [
+        custom_files = [
             {
                 path = "/var/home/${option('qemu_butane_user_name')}/hello-files"
                 mode = 420
@@ -29,6 +38,12 @@ Exec=sleep 1000
 [Install]
 WantedBy=multi-user.target
 """
+            }
+        ]
+        custom_copies = [
+            {
+                source = "/home/tdesaules/.config/some-tool/config.toml"
+                path = "/var/home/${option('qemu_butane_user_name')}/.config/some-tool/config.toml"
             }
         ]
         units += [

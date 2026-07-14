@@ -41,7 +41,7 @@ Linux uses a NetworkManager bridge `br-qemu` (`ipv4.method shared`) for VM netwo
 ```bash
 # 1. Copy the example config (note: French spelling "exemple")
 cp exemple.config.k config.k
-# Edit config.k: set beszel.url, custom packages, files, units, etc.
+# Edit config.k: set beszel.url, custom packages, files, copies, units, etc.
 
 # 2. Verify dependencies
 task -t taskfile.qemu.yaml check
@@ -86,6 +86,13 @@ Gitignored, user-owned. Copy `exemple.config.k` as a template. Must:
 - `import .schema as schema`
 - Bind `config = schema.Qemu { ... }`
 - Use `option('qemu_butane_user_name')` for username interpolation (not `_usr`)
+
+Customization fields on `Butane`:
+- `custom_pkgs` — additional RPM packages
+- `custom_mise_tools` — additional mise tools
+- `custom_files` — inline content files (path + mode + `contents.inline`)
+- `custom_copies` — host files to bake into ignition (`source` host path → `path` VM path)
+- `units +=` — append systemd units
 
 ### Generated artifacts (all gitignored)
 

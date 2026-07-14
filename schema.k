@@ -28,8 +28,7 @@ _starship_config_dir = "${file.read_env('HOME')}/.config/starship"
 _has_starship = file.exists(_starship_config_dir)
 _opencode_config_dir = "${file.read_env('HOME')}/.config/opencode"
 _opencode_data_dir = "${file.read_env('HOME')}/.local/share/opencode"
-_has_opencode_config = file.exists(_opencode_config_dir)
-_has_opencode_data = file.exists(_opencode_data_dir)
+_has_opencode_config = file.exists("${_opencode_config_dir}/opencode.json") or file.exists("${_opencode_config_dir}/tui.json") or file.exists("${_opencode_data_dir}/auth.json")
 _ssh_key_paths = [
     "${file.read_env('HOME')}/.ssh/id_ed25519.pub"
     "${file.read_env('HOME')}/.ssh/id_rsa.pub"
@@ -71,14 +70,6 @@ schema Qemu:
                 "-fsdev local,id=fsdev2,path=${_starship_config_dir},security_model=passthrough,readonly=on"
                 "-device virtio-9p-pci,fsdev=fsdev2,mount_tag=starship"
             ] if _has_starship else [])
-            *([
-                "-fsdev local,id=fsdev3,path=${_opencode_config_dir},security_model=passthrough"
-                "-device virtio-9p-pci,fsdev=fsdev3,mount_tag=opencode-config"
-            ] if _has_opencode_config else [])
-            *([
-                "-fsdev local,id=fsdev4,path=${_opencode_data_dir},security_model=passthrough"
-                "-device virtio-9p-pci,fsdev=fsdev4,mount_tag=opencode-data"
-            ] if _has_opencode_data else [])
             "-serial file:${workspace}/qemu.log"
         ]
     }
@@ -135,6 +126,10 @@ schema Butane:
     }
     custom_mise_tools: {str:str} = {}
     mise_tools: {str:str} = default_mise_tools | custom_mise_tools
+    custom_files: [ButaneFile] = []
+    default_copies: [ButaneCopy] = []
+    custom_copies: [ButaneCopy] = []
+    copies: [ButaneCopy] = default_copies + custom_copies
     directories: [ButaneDirectory]
     files: [ButaneFile]
     units: [ButaneUnit]
@@ -186,6 +181,21 @@ schema Butane:
             group = { name = "root" }
         }
     ] if beszel else [])
+    default_copies = [
+        {
+            source = "${_opencode_config_dir}/opencode.json"
+            path = "/var/home/${user.name}/.config/opencode/opencode.json"
+        }
+        {
+            source = "${_opencode_config_dir}/tui.json"
+            path = "/var/home/${user.name}/.config/opencode/tui.json"
+        }
+        {
+            source = "${_opencode_data_dir}/auth.json"
+            path = "/var/home/${user.name}/.local/share/opencode/auth.json"
+            mode = 384
+        }
+    ] if _has_opencode_config else []
     files = [
         {
             path = "/etc/zincati/config.d/50-disable-updates.toml"
@@ -290,7 +300,16 @@ schema Butane:
             mode = 420
             contents.inline = templates.etc_containers_systemd_beszel_agent_container(beszel.key or "", beszel.token or "", beszel.url or "", hostname)
         }
-    ] if beszel and beszel.token else [])
+    ] if beszel and beszel.token else []) + custom_files + [
+        {
+            path = c.path
+            mode = c.mode
+            user = c.user or {}
+            group = c.group or {}
+            contents.inline = file.read(c.source)
+        }
+        for c in copies if file.exists(c.source)
+    ]
     units = [
         {
             name = "install-system-pkgs.service"
@@ -337,29 +356,7 @@ schema Butane:
             enabled = True
             contents = templates.var_home_user_config_starship_mount(user.name)
         }
-    ] if _has_starship else []) + ([
-        {
-            name = "var-home-${user.name}-.config-opencode.mount"
-            enabled = True
-            contents = templates.var_home_user_config_opencode_mount(user.name)
-        }
-        {
-            name = "var-home-${user.name}-.config-opencode.automount"
-            enabled = True
-            contents = templates.var_home_user_config_opencode_automount(user.name)
-        }
-    ] if _has_opencode_config else []) + ([
-        {
-            name = "var-home-${user.name}-.local-share-opencode.mount"
-            enabled = True
-            contents = templates.var_home_user_local_share_opencode_mount(user.name)
-        }
-        {
-            name = "var-home-${user.name}-.local-share-opencode.automount"
-            enabled = True
-            contents = templates.var_home_user_local_share_opencode_automount(user.name)
-        }
-    ] if _has_opencode_data else [])
+    ] if _has_starship else [])
 
 schema ButaneUser:
     name: str = "${_username}"
@@ -379,6 +376,13 @@ schema ButaneFileUser:
 
 schema ButaneFileGroup:
     name: str = _groupname
+
+schema ButaneCopy:
+    source: str
+    path: str
+    mode: int = 420
+    user?: ButaneFileUser
+    group?: ButaneFileGroup
 
 schema ButaneDirectory:
     path: str

@@ -53,6 +53,61 @@ The schema is host-aware via `_host_os` and `_os_arch` (from `uname`). Key condi
 - Fedora CoreOS version + checksums are hard-coded in `schema.k` (`_os_version`, `_checksum_x86_64`, `_checksum_aarch64`). Bumping the OS means updating both the version string and the matching sha256, or `image-validation` will fail.
 - `butane-render.k` moves the default `core` user to UID 2000 to avoid conflicts with the host user's UID (1000 on Linux, 501 on macOS). Do not remove this — Ignition will fail with `useradd: UID 1000 is not unique`.
 
+## Copies and custom files
+
+The `Butane` schema provides three mechanisms to add files to the VM at ignition provisioning time:
+
+### `custom_files` — inline content files
+
+Files with inline content defined directly in `config.k`. Follows the same pattern as `custom_pkgs` and `custom_mise_tools`:
+
+```kcl
+butane = schema.Butane {
+    custom_files = [
+        {
+            path = "/var/home/${option('qemu_butane_user_name')}/hello-files"
+            mode = 420
+            contents.inline = "hello files\n"
+        }
+    ]
+}
+```
+
+### `copies` / `custom_copies` — host files baked into ignition
+
+Files read from the host filesystem at build time (KCL `file.read()`) and baked into the ignition config as inline butane files. The VM gets its own writable copies on the local filesystem — no 9p mount needed. Changes on the host require a VM rebuild (`down` + `up`) to take effect.
+
+```kcl
+butane = schema.Butane {
+    custom_copies = [
+        {
+            source = "${option('HOME')}/.config/some-tool/config.toml"
+            path = "/var/home/${option('qemu_butane_user_name')}/.config/some-tool/config.toml"
+        }
+    ]
+}
+```
+
+The `ButaneCopy` schema:
+- `source` — host path (read via `file.read()` at build time)
+- `path` — VM path
+- `mode` — file permissions (default: `420` = 0644)
+- `user` / `group` — optional, default to the butane user
+
+### `default_copies` — built-in copies
+
+The schema automatically copies opencode config from the host if they exist:
+
+| Source (host) | Destination (VM) | Mode | Purpose |
+|---|---|---|---|
+| `~/.config/opencode/opencode.json` | `~/.config/opencode/opencode.json` | 0644 | opencode config |
+| `~/.config/opencode/tui.json` | `~/.config/opencode/tui.json` | 0644 | TUI config |
+| `~/.local/share/opencode/auth.json` | `~/.local/share/opencode/auth.json` | 0600 | opencode auth |
+
+`_has_opencode_config` checks for any of these files. The comprehension in `files` only includes copies where `file.exists(c.source)` is true, so missing files are silently skipped.
+
+The `copies` field combines `default_copies + custom_copies`, following the same pattern as `default_pkgs` / `custom_pkgs` and `default_mise_tools` / `custom_mise_tools`.
+
 ## Environment variables
 
 The Taskfile reads credentials from env vars with `mise env --json` fallback (non-interactive shells don't source `mise activate`) and `gopass` as last resort:
