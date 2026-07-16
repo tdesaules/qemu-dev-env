@@ -271,7 +271,10 @@ RemainAfterExit=yes
 ExecStart=/usr/bin/bash -c ' \\
     /usr/bin/systemctl daemon-reload; \\
     /usr/bin/systemctl enable cockpit.socket; \\
-    /usr/bin/systemctl start cockpit.socket || true'
+    for i in $(seq 1 5); do \\
+        /usr/bin/systemctl start cockpit.socket && break; \\
+        sleep 2; \\
+    done'
 
 [Install]
 WantedBy=multi-user.target

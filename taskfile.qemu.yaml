@@ -499,6 +499,10 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "deactivate bridge network"
+        if pgrep -f 'qemu-system.*br-qemu' > /dev/null 2>&1; then
+          {{ .log }} "warning" "other QEMU VMs are still using br-qemu, skipping bridge deactivation"
+          exit 0
+        fi
         {{ .log }} "info" "sudo nmcli connection down br-qemu"
         sudo nmcli connection down br-qemu > /dev/null 2>&1 || true
         {{ .log }} "success" "br-qemu bridge deactivated"
@@ -607,7 +611,18 @@ tasks:
         if [ "$REBOOT_NEEDED" = "true" ]; then
           {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl reboot\""
           ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl reboot" 2>/dev/null || true
-          sleep 1
+          # Wait for SSH to become unavailable (confirm reboot started)
+          SHUTDOWN_TIMEOUT=30
+          COUNTER=0
+          while ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+            if [ $COUNTER -gt $SHUTDOWN_TIMEOUT ]; then
+              {{ .log }} "warning" "VM did not shut down within ${SHUTDOWN_TIMEOUT}s, continuing anyway"
+              break
+            fi
+          done
+          # Wait for SSH to come back online
           TIMEOUT=45
           COUNTER=0
           {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."

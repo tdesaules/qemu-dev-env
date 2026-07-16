@@ -8,6 +8,8 @@ _groupname = option("qemu_butane_group_name") or _username
 _uid = int(option("qemu_butane_user_id") or "1000")
 _uuid = file.read("${_taskfile_dir}/.uuid").strip() if file.exists("${_taskfile_dir}/.uuid") else crypto.uuid()
 _workspace = "${file.read_env('HOME')}/.qemu/${_uuid}"
+_mac_hex = _uuid.replace("-", "")
+_mac = "52:54:00:" + _mac_hex[0:2] + ":" + _mac_hex[2:4] + ":" + _mac_hex[4:6]
 _host_os = option("qemu_host_os") or "null"
 _os_arch = option("qemu_host_arch") or "null"
 _aio_opt = ",aio=io_uring" if _host_os == "linux" else ""
@@ -61,7 +63,7 @@ schema Qemu:
             "-drive if=virtio,format=qcow2,file=${workspace}/qemu.qcow2,cache=unsafe${_aio_opt}"
             "-fw_cfg name=opt/com.coreos/config,file=${_taskfile_dir}/config.ign"
             "-netdev vmnet-shared,id=net0" if host_os == "darwin" else "-netdev bridge,id=net0,br=br-qemu"
-            "-device virtio-net-pci,netdev=net0"
+            "-device virtio-net-pci,netdev=net0,mac=${_mac}"
             "-fsdev local,id=fsdev0,path=${workspace},security_model=passthrough"
             "-device virtio-9p-pci,fsdev=fsdev0,mount_tag=qemu"
             "-fsdev local,id=fsdev1,path=${file.read_env('PWD')},security_model=passthrough"
