@@ -616,7 +616,7 @@ tasks:
           {{ .log }} "info" "waiting for VM to shut down..."
           SHUTDOWN_TIMEOUT=30
           COUNTER=0
-          while ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+          while ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
             sleep 1
             COUNTER=$((COUNTER + 1))
             if [ $COUNTER -gt $SHUTDOWN_TIMEOUT ]; then
@@ -628,7 +628,7 @@ tasks:
           {{ .log }} "info" "waiting for VM to come back online..."
           TIMEOUT=90
           COUNTER=0
-          until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
+          until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
             sleep 1
             COUNTER=$((COUNTER + 1))
             if [ $COUNTER -gt $TIMEOUT ]; then
