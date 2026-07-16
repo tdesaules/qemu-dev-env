@@ -76,6 +76,7 @@ tasks:
       - task: check-kcl
       - task: check-curl
       - task: check-gpgv
+      - task: check-os-update
 
   up:
     desc: "QEMU : Wake up the virtual machine"
@@ -213,6 +214,36 @@ tasks:
         {{ .log }} "info" "command -v gpgv"
         if ! command -v gpgv > /dev/null 2>&1 ; then {{ .error }} "can't find \"gpgv\" binary" ; fi
         {{ .log }} "success" "\"gpgv\" binary available"
+
+  check-os-update:
+    desc: "QEMU : Check if a newer Fedora CoreOS image is available"
+    silent: true
+    cmds:
+      - |
+        {{ .log }} "title" "check fedora coreos stable stream"
+        {{ .log }} "info" "current version: {{ .qemu_os_version }}"
+        STREAM_URL="https://builds.coreos.fedoraproject.org/streams/stable.json"
+        LATEST_JSON=$(curl -s --max-time 10 "$STREAM_URL" 2>/dev/null)
+        if [ -z "$LATEST_JSON" ]; then
+          {{ .log }} "notice" "skipped: could not reach stream metadata endpoint"
+          exit 0
+        fi
+        LATEST_VERSION=$(echo "$LATEST_JSON" | jq -r '.architectures.x86_64.artifacts.qemu.release')
+        LATEST_X86_64=$(echo "$LATEST_JSON" | jq -r '.architectures.x86_64.artifacts.qemu.formats."qcow2.xz".disk.sha256')
+        LATEST_AARCH64=$(echo "$LATEST_JSON" | jq -r '.architectures.aarch64.artifacts.qemu.formats."qcow2.xz".disk.sha256')
+        if [ "$LATEST_VERSION" = "{{ .qemu_os_version }}" ]; then
+          {{ .log }} "success" "fedora coreos is up to date ({{ .qemu_os_version }})"
+        else
+          {{ .log }} "warning" "newer fedora coreos image available: ${LATEST_VERSION}"
+          echo ""
+          echo "  Update schema.k with:"
+          echo "    _os_version       = \"${LATEST_VERSION}\""
+          echo "    _checksum_x86_64  = \"${LATEST_X86_64}\""
+          echo "    _checksum_aarch64 = \"${LATEST_AARCH64}\""
+          echo ""
+          echo "  Then rebuild: task devenv:down && task devenv:up"
+          echo ""
+        fi
 
   generate-uuid:
     internal: true
