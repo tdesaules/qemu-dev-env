@@ -5,6 +5,11 @@ through KCL (`*.k`) -> butane (`config.bu`) -> ignition (`config.ign`). There is
 application code, no tests, no lint, no build step — only a `task` (go-task) Taskfile and
 KCL config files.
 
+## Git workflow
+
+- **Always commit changes locally** following conventional commits. Do not leave the working tree dirty after completing a task.
+- **Never push.** `git push` (and any remote-syncing operation) is performed manually by the owner.
+
 ## Running tasks
 
 The Taskfile has a non-default name: **`taskfile.qemu.yaml`**. Every `task` invocation must
