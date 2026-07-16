@@ -189,7 +189,7 @@ no_self_update = true
 disable = ["mise", "firmware", "containers", "toolbx"]
 
 [commands]
-"Mise" = "mise install --yes"
+"Mise" = "mise install --yes || true"
 """
 }
 
