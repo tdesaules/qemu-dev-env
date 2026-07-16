@@ -2,12 +2,12 @@ import .schema as schema
 
 config = schema.Qemu {
     hardware = schema.Hardware {
-        cpu = 2
+        cpu = 1
         memory = schema.Memory {
-            size = 4096
+            size = 1024
         }
         disk = schema.Disk {
-            size = 30
+            size = 16
         }
     }
     butane = schema.Butane {
@@ -16,6 +16,9 @@ config = schema.Qemu {
         ]
         github = {
             token = option("github_token")
+        }
+        beszel = {
+            url = "http://10.10.10.1:8090"
         }
         custom_mise_tools = {
             "go" = "latest"
@@ -65,10 +68,5 @@ WantedBy=multi-user.target
 """
             }
         ]
-        beszel = {
-            key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOI+P..."
-            token = "38ae33f7-126e-4c2a-8622-b644........"
-            url = "http://192.168.2.1:8090"
-        }
     }
 }
