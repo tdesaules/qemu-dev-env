@@ -529,8 +529,8 @@ tasks:
         {{ .log }} "title" "wait ssh accessible"
         TIMEOUT=30
         COUNTER=0
-        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."
-        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
+        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do..."
+        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
         sleep 1
           COUNTER=$((COUNTER + 1))
           if [ $COUNTER -gt $TIMEOUT ]; then
@@ -550,8 +550,8 @@ tasks:
         {{ .log }} "title" "wait rpm packages installation"
         TIMEOUT=180
         COUNTER=0
-        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null\" 2> /dev/null; do..."
-        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null" 2> /dev/null; do
+        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null\" 2> /dev/null; do..."
+        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active install-system-pkgs.service > /dev/null || systemctl is-failed install-system-pkgs.service > /dev/null" 2> /dev/null; do
           sleep 1
           COUNTER=$((COUNTER + 1))
           if [ $COUNTER -gt $TIMEOUT ]; then
@@ -559,7 +559,7 @@ tasks:
             exit 1
           fi
         done
-        if ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed install-system-pkgs.service >/dev/null" 2> /dev/null; then
+        if ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed install-system-pkgs.service >/dev/null" 2> /dev/null; then
           {{ .error }} "rpm installation service FAILED. Check logs with: ssh {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local 'sudo journalctl -u install-system-pkgs.service'"
           exit 1
         fi
@@ -575,8 +575,8 @@ tasks:
         {{ .log }} "title" "wait topgrade updates virtual machine"
         TIMEOUT=300
         COUNTER=0
-        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active run-topgrade.service > /dev/null || systemctl is-failed run-topgrade.service > /dev/null\" 2> /dev/null; do..."
-        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active run-topgrade.service > /dev/null || systemctl is-failed run-topgrade.service > /dev/null" 2> /dev/null; do
+        {{ .log }} "info" "until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"systemctl is-active run-topgrade.service > /dev/null || systemctl is-failed run-topgrade.service > /dev/null\" 2> /dev/null; do..."
+        until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-active run-topgrade.service > /dev/null || systemctl is-failed run-topgrade.service > /dev/null" 2> /dev/null; do
           sleep 1
           COUNTER=$((COUNTER + 1))
           if [ $COUNTER -gt $TIMEOUT ]; then
@@ -584,7 +584,7 @@ tasks:
             exit 1
           fi
         done
-        if ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed run-topgrade.service >/dev/null" 2> /dev/null; then
+        if ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "systemctl is-failed run-topgrade.service >/dev/null" 2> /dev/null; then
           {{ .error }} "topgrade service FAILED. Check logs with: ssh {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local 'sudo journalctl -u run-topgrade.service'"
           exit 1
         fi
@@ -604,19 +604,19 @@ tasks:
         if [ "{{ .force }}" = "true" ]; then
           REBOOT_NEEDED="true"
           {{ .log }} "warning" "forced reboot requested"
-        elif ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "rpm-ostree status --json" | jq -e '.deployments[0].booted == false' >/dev/null 2>&1; then
+        elif ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "rpm-ostree status --json" | jq -e '.deployments[0].booted == false' >/dev/null 2>&1; then
           REBOOT_NEEDED="true"
           {{ .log }} "warning" "staged updates detected reboot is required"
         fi
         if [ "$REBOOT_NEEDED" = "true" ]; then
-          {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl reboot\""
-          ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl reboot" 2>/dev/null || true
+          {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl reboot\""
+          ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl reboot" 2>/dev/null || true
           sleep 3
           # Wait for SSH to become unavailable (confirm reboot started)
           {{ .log }} "warning" "waiting for VM to shut down..."
           SHUTDOWN_TIMEOUT=30
           COUNTER=0
-          while ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
+          while ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2>/dev/null; do
             sleep 1
             COUNTER=$((COUNTER + 1))
             if [ $COUNTER -gt $SHUTDOWN_TIMEOUT ]; then
@@ -628,7 +628,7 @@ tasks:
           {{ .log }} "warning" "waiting for VM to come back online..."
           TIMEOUT=90
           COUNTER=0
-          until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
+          until ssh -q -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local exit 2> /dev/null; do
             sleep 1
             COUNTER=$((COUNTER + 1))
             if [ $COUNTER -gt $TIMEOUT ]; then
@@ -682,8 +682,8 @@ tasks:
           {{ .log }} "error" "QEMU virtual machine is not started."
           exit 1
         fi
-        {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local"
-        ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local
+        {{ .log }} "info" "ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local"
+        ssh -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local
 
   get-logs:
     internal: true
@@ -715,8 +715,8 @@ tasks:
             {{ .log }} "info" "sudo kill -9 "$PID" 2> /dev/null || true"
             sudo kill -9 "$PID" 2> /dev/null || true
           else
-            {{ .log }} "info" "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl poweroff\" 2> /dev/null || ({{ .log }} \"warning" "SSH unreachable, falling back to SIGTERM...\" && sudo kill \"$PID\")"
-            ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl poweroff" 2> /dev/null || ({{ .log }} "warning" "SSH unreachable, falling back to SIGTERM..." && sudo kill "$PID")
+            {{ .log }} "info" "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local \"sudo systemctl poweroff\" 2> /dev/null || ({{ .log }} \"warning" "SSH unreachable, falling back to SIGTERM...\" && sudo kill \"$PID\")"
+            ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand=none {{ .qemu_butane_user_name }}@{{ .qemu_uuid }}.local "sudo systemctl poweroff" 2> /dev/null || ({{ .log }} "warning" "SSH unreachable, falling back to SIGTERM..." && sudo kill "$PID")
             TIMEOUT=20
             COUNTER=0
             while sudo kill -0 "$PID" 2> /dev/null; do
