@@ -15,10 +15,10 @@ _os_arch = option("qemu_host_arch") or "null"
 _aio_opt = ",aio=io_uring" if _host_os == "linux" else ""
 _os_name: str = "fedora"
 _os_edition: str = "coreos"
-_os_version: str = "44.20260720.3.1"
+_os_version: str = "44.20260802.3.1"
 _os_streams: str = "stable"
-_checksum_x86_64 = "1bdc3c59b16508b9c24ac85b7d2543261a02bef5fae4ec5820511b4e7d66a338"
-_checksum_aarch64 = "e3e848071b3afa3453df7247fe94ce9978e210879adfb1f53610f63ed8912777"
+_checksum_x86_64 = "1c4e4dc9a4780e03f4137c4c6394ffc88358c7a540bc983f4d4cb97110fa3676"
+_checksum_aarch64 = "eaa978faf5dcb1a593f7df551a8b61fe572e3531daa72d4aaeffc260fadc6cd8"
 
 _edk2_candidates = [
     "/opt/homebrew/share/qemu/edk2-aarch64-code.fd"
