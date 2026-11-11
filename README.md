@@ -80,6 +80,20 @@ butane --strict          → config.ign (ignition JSON)
 QEMU -fw_cfg             → VM boots with ignition config
 ```
 
+### KCL host filesystem access
+
+KCL 0.13.3 restricts file access to the module directory by default. This
+environment intentionally reads host files outside it: firmware paths, SSH public
+keys, tool configuration and `custom_copies` sources. The Taskfile sets
+`KCL_FILE_SCOPE=off` for both KCL invocations (configuration and Butane rendering).
+Use the same prefix when running KCL manually, for example:
+
+```bash
+KCL_FILE_SCOPE=off kcl config.k --format json
+```
+
+An error containing `escapes module root` indicates that this setting is missing.
+
 ## `config.k` — complete reference
 
 `config.k` is gitignored and user-owned. Copy `exemple.config.k` as a template:

@@ -17,7 +17,8 @@ vars:
     sh: |
       CONFIG_PATH="{{ .TASKFILE_DIR }}/config.k"
       if [ ! -f "$CONFIG_PATH" ]; then echo '{"config":{"butane":{},"checksum":{},"command":{"options":[]},"hardware":{"memory":{},"disk":{}},"os":{}}}'; exit 0; fi
-      kcl "$CONFIG_PATH" --format json \
+      # The schema intentionally reads host files outside the KCL module.
+      KCL_FILE_SCOPE=off kcl "$CONFIG_PATH" --format json \
         --argument taskfile_dir='{{ .TASKFILE_DIR }}' \
         --argument qemu_butane_user_name='{{ .qemu_butane_user_name | lower }}' \
         --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' \
@@ -371,8 +372,8 @@ tasks:
     cmds:
       - |
         {{ .log }} "title" "build butane"
-        {{ .log }} "info" "kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --argument beszel_token='{{ .qemu_beszel_token }}' --argument beszel_key='{{ .qemu_beszel_key }}' --path_selector butane"
-        if ! kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --argument beszel_token='{{ .qemu_beszel_token }}' --argument beszel_key='{{ .qemu_beszel_key }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
+        {{ .log }} "info" "KCL_FILE_SCOPE=off kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --argument beszel_token='{{ .qemu_beszel_token }}' --argument beszel_key='{{ .qemu_beszel_key }}' --path_selector butane"
+        if ! KCL_FILE_SCOPE=off kcl {{ .TASKFILE_DIR }}/butane-render.k --argument qemu_butane_user_name='{{ .qemu_butane_user_name }}' --argument qemu_butane_user_id='{{ .qemu_butane_user_id }}' --argument github_token='{{ .qemu_github_token }}' --argument beszel_token='{{ .qemu_beszel_token }}' --argument beszel_key='{{ .qemu_beszel_key }}' --path_selector butane > {{ .TASKFILE_DIR }}/config.bu; then {{ .error }} "butane config failed"; fi
         {{ .log }} "success" "butane configuration generated"
 
   build-ignition:
