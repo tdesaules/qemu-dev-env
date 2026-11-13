@@ -74,10 +74,31 @@ All tasks require `-t taskfile.qemu.yaml`.
 ## Config flow
 
 ```
-config.k (user)          → KCL schema → JSON (kcl_dataset var)
+config.k (user)          → task-config.k → metadata JSON (kcl_dataset var)
 butane-render.k          → config.bu (butane YAML)
 butane --strict          → config.ign (ignition JSON)
 QEMU -fw_cfg             → VM boots with ignition config
+```
+
+`task-config.k` exports only the metadata used by Task: identity, workspace, OS,
+checksums, hardware, QEMU command, GitHub token and optional Beszel URL. Task makes
+variables available to subprocesses through their environment. Exporting the full
+configuration, including copied files and units, can exceed Linux's per-entry
+environment limit (128 KiB with 4-KiB pages) and fail with `argument list too long`
+even for `status`. Compacting the JSON alone does not bound its size.
+
+`butane-render.k` still consumes the full configuration, so large files remain in
+the generated Ignition. To inspect the Task view manually, use
+`KCL_FILE_SCOPE=off kcl task-config.k --format json`; its output can include a
+configured GitHub token and should not be logged publicly.
+
+An offline regression check uses an isolated HOME, a large copied file and stubbed
+credential/network lookups. It verifies standalone/included Task status, metadata
+compatibility, KCL failure propagation and the complete Ignition payload:
+
+```bash
+# Requires Python 3, KCL, Task, jq and Butane; does not start or stop a VM.
+python3 tests/task_metadata.py
 ```
 
 ### KCL host filesystem access
@@ -580,6 +601,7 @@ The `.uuid` file in repo root is the VM identity. Do not delete it between runs 
 | `taskfile.qemu.yaml` | go-task Taskfile (non-default name) |
 | `schema.k` | KCL schema: VM hardware, QEMU command, butane contents |
 | `templates.k` | KCL lambda strings: repo files, systemd units, sudoers |
+| `task-config.k` | Bounded metadata view for Task, excluding provisioning payloads |
 | `butane-render.k` | KCL entrypoint: merges schema + config → butane YAML |
 | `exemple.config.k` | Example config template (French spelling intentional) |
 | `scripts/utils.sh` | Nord-colored logging (`_log` / `_error_handler`) |

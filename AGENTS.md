@@ -2,8 +2,8 @@
 
 Repository for spinning up a disposable Fedora CoreOS VM in QEMU, configured end-to-end
 through KCL (`*.k`) -> butane (`config.bu`) -> ignition (`config.ign`). There is no
-application code, no tests, no lint, no build step — only a `task` (go-task) Taskfile and
-KCL config files.
+application code, no lint or build step — a `task` (go-task) Taskfile, KCL config
+files and an offline metadata regression check (`python3 tests/task_metadata.py`).
 
 ## Git workflow
 
@@ -27,7 +27,7 @@ Public tasks:
 ## Config flow
 
 1. User writes `config.k` at repo root (gitignored; copy `exemple.config.k` — note the French spelling — as a template). It must `import .schema as schema` and bind `config = schema.Qemu { ... }`.
-2. `kcl_dataset` Taskfile var runs `kcl config.k --format json` with several `--argument`s derived from the host: `taskfile_dir`, `qemu_butane_user_name`, `qemu_butane_user_id`, `qemu_host_arch`, `qemu_host_os`, `github_token`. `schema.k` reads these via `option(...)`. The result is re-parsed with `fromJson` into many `qemu_*` vars — keep this shape stable when editing the schema. (A historical `cache: true` key was removed: it was a no-op on older go-task and rejected by go-task ≥ 3.34 — do not re-add it.)
+2. `kcl_dataset` Taskfile var runs `kcl task-config.k --format json` with several `--argument`s derived from the host: `taskfile_dir`, `qemu_butane_user_name`, `qemu_butane_user_id`, `qemu_host_arch`, `qemu_host_os`, `github_token`. `task-config.k` imports `config.k` but exports only the metadata consumed by Task, excluding large provisioning files and units. `schema.k` reads the arguments via `option(...)`. The result is re-parsed with `fromJson` into many `qemu_*` vars — keep this shape stable when editing the schema and update the metadata view for new consumers. Never export the full config: Task passes vars to subprocess environments, subject to per-entry size limits. (A historical `cache: true` key was removed: it was a no-op on older go-task and rejected by go-task ≥ 3.34 — do not re-add it.)
 3. `build-butane`: `kcl butane-render.k --path_selector butane > config.bu`. `butane-render.k` imports both `schema.k` and `config.k`, so changes to either invalidate this step (declared in `sources:`). Additional `--argument`s passed at this stage: `beszel_token` (auto-fetched from hub API), `beszel_key` (from env/gopass).
 4. `build-ignition`: `butane --strict config.bu --output config.ign`. The `.ign` is passed to QEMU via `-fw_cfg name=opt/com.coreos/config`.
 
